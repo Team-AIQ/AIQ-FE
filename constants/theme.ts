@@ -8,6 +8,22 @@ import { Platform } from 'react-native';
 const tintColorLight = '#0a7ea4';
 const tintColorDark = '#fff';
 
+// AIQ 앱 공통 색상
+export const AppColors = {
+  black: '#020304',
+  primaryGreen: '#3FDD90',
+  secondaryGreen: '#45D38E',
+  white: '#FFFFFF',
+  gray: '#999999',
+  lightGray: '#E5E5E5',
+  error: '#FF4D4D',
+};
+
+// AIQ 앱 공통 폰트
+export const AppFonts = {
+  regular: 'Galmuri9',
+};
+
 export const Colors = {
   light: {
     text: '#11181C',

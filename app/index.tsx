@@ -1,12 +1,3 @@
-/**
- * Splash Screen – FINAL (Figma 1:1 논리)
- *
- * - 그림 로고는 고정
- * - AIQ 글씨 + 캐릭터는 같이 살짝 내려감
- * - 캐릭터는 처음부터 전체 이미지
- * - 화면 아래에 걸려 자연스럽게 잘림
- */
-
 import { useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useEffect, useRef, useState } from "react";
@@ -16,7 +7,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 const { width, height } = Dimensions.get("window");
 
 const COLORS = {
-  green: "#3FDD90",
+  green: "#5EDE94", // GIF 배경색에 맞춤 (더 밝게)
 };
 
 export default function SplashScreen() {
@@ -44,7 +35,7 @@ export default function SplashScreen() {
 
     // 3️⃣ 스플래시 종료
     const exitTimer = setTimeout(() => {
-      router.replace("/(tabs)");
+      router.replace("/(auth)/welcome");
     }, 2500);
 
     return () => {
@@ -63,13 +54,9 @@ export default function SplashScreen() {
            ====================== */}
         <View style={styles.logoArea}>
           <Image
-            source={
-              showBeam
-                ? require("../assets/images/beam-logo.png")
-                : require("../assets/images/no-beam-logo.png")
-            }
+            source={require("../assets/images/aiq-animation-logo.gif")}
             style={styles.beamLogo}
-            resizeMode="contain"
+            contentFit="contain"
           />
         </View>
 
@@ -129,8 +116,8 @@ const styles = StyleSheet.create({
   },
 
   beamLogo: {
-    width: width * 0.28,
-    height: height * 0.14,
+    width: width * 0.38,
+    height: height * 0.19,
   },
 
   /* =========================
@@ -152,8 +139,9 @@ const styles = StyleSheet.create({
 
   /* 캐릭터 */
   character: {
-    width: width * 0.62,
-    height: height * 0.45,
-    marginBottom: -height * 0.14, // ❗️발만 자연스럽게 화면 밖
+    width: width * 0.68,
+    height: height * 0.50,
+    marginTop: 10,
+    marginBottom: -height * 0.12, // ❗️다리 살짝 가림
   },
 });

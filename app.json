@@ -4,25 +4,21 @@
     "slug": "AIQ-FE",
     "version": "1.0.0",
     "orientation": "portrait",
-
-    /* 다크/라이트 자동 */
+    "scheme": "aiq",
     "userInterfaceStyle": "automatic",
-
-    /* Expo Router 사용 */
-    "plugins": ["expo-router"],
-
-    /* iOS 기본 설정 */
+    "plugins": [
+      "expo-router",
+      "expo-secure-store"
+    ],
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.aiq.app"
     },
-
-    /* Android 기본 설정 */
     "android": {
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.aiq.app"
     },
-
-    /* 실험 기능 */
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
