@@ -1,7 +1,7 @@
 import { API_ENDPOINTS } from "@/constants/api";
 import { AppColors } from "@/constants/theme";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { jwtDecode } from "jwt-decode";
+import { getAccessToken } from "@/lib/auth-storage";
 import { useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useEffect, useRef, useState } from "react";
@@ -197,7 +197,7 @@ export default function HomeScreen() {
 
     try {
       // 저장된 토큰 가져오기
-      const accessToken = await AsyncStorage.getItem("accessToken");
+      const accessToken = await getAccessToken();
       console.log("Access token:", accessToken ? "있음" : "없음");
 
       if (!accessToken) {

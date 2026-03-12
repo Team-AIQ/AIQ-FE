@@ -1,9 +1,10 @@
+import { API_ENDPOINTS } from "@/constants/api";
 import { AppColors } from "@/constants/theme";
 import { useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useEffect, useRef, useState } from "react";
 import {
-  Dimensions,
+  Alert,
   Image,
   Keyboard,
   StyleSheet,
@@ -15,37 +16,28 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-const { width } = Dimensions.get("window");
-
 type Step = "email" | "code" | "reset";
 
 export default function ForgotPasswordScreen() {
   const router = useRouter();
-
-  // 현재 단계
   const [step, setStep] = useState<Step>("email");
-
-  // Step 1: 이메일
   const [email, setEmail] = useState("");
   const [emailError, setEmailError] = useState("");
-
-  // Step 2: 인증 코드
   const [code, setCode] = useState(["", "", "", "", "", ""]);
   const [timer, setTimer] = useState(300);
-  const [codeError, setCodeError] = useState(false);
+  const [codeError, setCodeError] = useState("");
   const [resendMessage, setResendMessage] = useState("");
-
-  // Step 3: 비밀번호 재설정
   const [password, setPassword] = useState("");
   const [passwordConfirm, setPasswordConfirm] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [showPasswordConfirm, setShowPasswordConfirm] = useState(false);
   const [passwordError, setPasswordError] = useState("");
   const [passwordConfirmError, setPasswordConfirmError] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const codeInputRef = useRef<TextInput>(null);
 
-  // 타이머 (Step 2)
   useEffect(() => {
-    if (step !== "code") return;
+    if (step !== "code" || timer <= 0) return;
 
     const interval = setInterval(() => {
       setTimer((prev) => {
@@ -53,50 +45,94 @@ export default function ForgotPasswordScreen() {
           clearInterval(interval);
           return 0;
         }
+
         return prev - 1;
       });
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [step]);
+  }, [step, timer]);
+
+  const isValidEmail = /\S+@\S+\.\S+/.test(email);
+
+  const validatePassword = (value: string) => {
+    const regex = /^(?=.*[a-z])(?=.*\d)(?=.*[@$!%*?&#])[A-Za-z\d@$!%*?&#]{8,16}$/;
+    return regex.test(value);
+  };
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
-    return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+    return `${mins.toString().padStart(2, "0")}:${secs
+      .toString()
+      .padStart(2, "0")}`;
   };
 
-  // Step 1: 이메일 전송
-  const handleSendCode = async () => {
-    if (!email) return;
-    try {
-      console.log("인증 코드 발송:", email);
-      setStep("code");
-      setTimer(300);
-    } catch (error) {
-      setEmailError("이메일이 올바르지 않습니다");
+  const requestPasswordCode = async () => {
+    const response = await fetch(API_ENDPOINTS.PASSWORD_CODE_REQUEST, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ email }),
+    });
+
+    if (!response.ok) {
+      const message = await response.text();
+      throw new Error(message || "인증 코드를 보낼 수 없습니다.");
     }
   };
 
-  // Step 2: 코드 입력
+  const handleSendCode = async () => {
+    if (!isValidEmail) {
+      setEmailError("올바른 이메일을 입력해주세요.");
+      return;
+    }
+
+    setIsLoading(true);
+    setEmailError("");
+
+    try {
+      await requestPasswordCode();
+      setStep("code");
+      setTimer(300);
+      setResendMessage("");
+      setCode(["", "", "", "", "", ""]);
+    } catch (error) {
+      setEmailError(
+        error instanceof Error ? error.message : "이메일을 확인해주세요.",
+      );
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleCodeInput = (value: string) => {
     if (!/^\d*$/.test(value)) return;
 
-    const newCode = value.split("").slice(0, 6);
-    while (newCode.length < 6) newCode.push("");
-    setCode(newCode);
-    setCodeError(false);
+    const next = value.slice(0, 6).split("");
+    while (next.length < 6) next.push("");
+
+    setCode(next);
+    setCodeError("");
   };
 
   const handleResend = async () => {
+    setIsLoading(true);
+    setCodeError("");
+
     try {
-      console.log("인증 코드 재발송:", email);
+      await requestPasswordCode();
       setTimer(300);
       setCode(["", "", "", "", "", ""]);
-      setResendMessage("코드가 재전송 되었습니다");
+      setResendMessage("코드가 재전송되었습니다.");
       setTimeout(() => setResendMessage(""), 3000);
     } catch (error) {
-      console.error("Resend code error:", error);
+      setCodeError(
+        error instanceof Error ? error.message : "코드 재전송에 실패했습니다.",
+      );
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -104,65 +140,121 @@ export default function ForgotPasswordScreen() {
     const verificationCode = code.join("");
     if (verificationCode.length !== 6) return;
 
+    setIsLoading(true);
+    setCodeError("");
+
     try {
-      console.log("인증 코드 확인:", verificationCode);
+      const response = await fetch(API_ENDPOINTS.PASSWORD_VERIFY, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          email,
+          code: verificationCode,
+        }),
+      });
+
+      if (!response.ok) {
+        const message = await response.text();
+        throw new Error(message || "인증 코드가 올바르지 않습니다.");
+      }
+
       setStep("reset");
     } catch (error) {
-      setCodeError(true);
+      setCodeError(
+        error instanceof Error ? error.message : "인증 코드가 올바르지 않습니다.",
+      );
+    } finally {
+      setIsLoading(false);
     }
-  };
-
-  // Step 3: 비밀번호 재설정
-  const validatePassword = (pwd: string) => {
-    const regex = /^(?=.*[a-z])(?=.*\d)(?=.*[@$!%*?&#])[a-z\d@$!%*?&#]{8,16}$/;
-    return regex.test(pwd);
   };
 
   const handlePasswordBlur = () => {
     if (password && !validatePassword(password)) {
-      setPasswordError("비밀번호가 올바르지 않습니다");
-    } else {
-      setPasswordError("");
+      setPasswordError("영문, 숫자, 특수문자를 포함해 8~16자로 입력해주세요.");
+      return;
     }
+
+    setPasswordError("");
   };
 
   const handlePasswordConfirmBlur = () => {
     if (passwordConfirm && password !== passwordConfirm) {
-      setPasswordConfirmError("비밀번호가 올바르지 않습니다");
-    } else {
-      setPasswordConfirmError("");
+      setPasswordConfirmError("비밀번호가 일치하지 않습니다.");
+      return;
     }
+
+    setPasswordConfirmError("");
   };
 
   const handleResetPassword = async () => {
-    if (!validatePassword(password) || password !== passwordConfirm) return;
+    if (!validatePassword(password)) {
+      setPasswordError("영문, 숫자, 특수문자를 포함해 8~16자로 입력해주세요.");
+      return;
+    }
+
+    if (password !== passwordConfirm) {
+      setPasswordConfirmError("비밀번호가 일치하지 않습니다.");
+      return;
+    }
+
+    setIsLoading(true);
 
     try {
-      console.log("비밀번호 재설정 완료");
-      router.replace("/(auth)/login");
+      const response = await fetch(API_ENDPOINTS.PASSWORD_RESET, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          email,
+          password,
+          passwordConfirm,
+        }),
+      });
+
+      if (!response.ok) {
+        const message = await response.text();
+        throw new Error(message || "비밀번호 재설정에 실패했습니다.");
+      }
+
+      Alert.alert("재설정 완료", "새 비밀번호로 다시 로그인해주세요.", [
+        {
+          text: "확인",
+          onPress: () => router.replace("/(auth)/login"),
+        },
+      ]);
     } catch (error) {
-      console.error("Reset password error:", error);
+      Alert.alert(
+        "오류",
+        error instanceof Error ? error.message : "비밀번호 재설정에 실패했습니다.",
+      );
+    } finally {
+      setIsLoading(false);
     }
   };
 
   const handleBack = () => {
     if (step === "email") {
       router.back();
-    } else if (step === "code") {
-      setStep("email");
-    } else {
-      setStep("code");
+      return;
     }
+
+    if (step === "code") {
+      setStep("email");
+      return;
+    }
+
+    setStep("code");
   };
 
   const isCodeComplete = code.every((digit) => digit !== "");
   const isPasswordValid =
-    password &&
-    passwordConfirm &&
+    password.length > 0 &&
+    passwordConfirm.length > 0 &&
     validatePassword(password) &&
     password === passwordConfirm;
-
-  const codeInputRef = useRef<TextInput>(null);
 
   return (
     <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
@@ -170,7 +262,6 @@ export default function ForgotPasswordScreen() {
         <StatusBar style="light" />
 
         <View style={styles.container}>
-          {/* 뒤로가기 버튼 */}
           <TouchableOpacity style={styles.backButton} onPress={handleBack}>
             <Image
               source={require("../../assets/images/back-icon.png")}
@@ -178,13 +269,12 @@ export default function ForgotPasswordScreen() {
             />
           </TouchableOpacity>
 
-          {/* Step 1: 이메일 입력 */}
-          {step === "email" && (
+          {step === "email" ? (
             <View style={styles.content}>
               <View style={styles.header}>
                 <Text style={styles.titleGreen}>비밀번호 재설정</Text>
                 <Text style={styles.subtitle}>
-                  'AIQ'에 가입했던 이메일을 입력해주세요
+                  AIQ에 가입한 이메일을 입력해주세요.
                 </Text>
               </View>
 
@@ -192,12 +282,12 @@ export default function ForgotPasswordScreen() {
                 <View style={styles.inputContainer}>
                   <Text style={styles.label}>이메일</Text>
                   <TextInput
-                    style={[styles.input, emailError && styles.inputError]}
+                    style={[styles.input, emailError ? styles.inputError : null]}
                     placeholder="이메일을 입력하세요"
                     placeholderTextColor={AppColors.gray}
                     value={email}
-                    onChangeText={(text) => {
-                      setEmail(text);
+                    onChangeText={(value) => {
+                      setEmail(value);
                       setEmailError("");
                     }}
                     keyboardType="email-address"
@@ -209,30 +299,27 @@ export default function ForgotPasswordScreen() {
                 </View>
 
                 <TouchableOpacity
-                  style={[styles.button, email && styles.buttonActive]}
+                  style={[
+                    styles.button,
+                    isValidEmail && !isLoading ? styles.buttonActive : null,
+                  ]}
+                  disabled={!isValidEmail || isLoading}
                   onPress={handleSendCode}
-                  disabled={!email}
                 >
-                  <Text
-                    style={[
-                      styles.buttonText,
-                      email && styles.buttonTextActive,
-                    ]}
-                  >
-                    다음
+                  <Text style={styles.buttonText}>
+                    {isLoading ? "전송 중..." : "다음"}
                   </Text>
                 </TouchableOpacity>
               </View>
             </View>
-          )}
+          ) : null}
 
-          {/* Step 2: 인증 코드 입력 */}
-          {step === "code" && (
+          {step === "code" ? (
             <View style={styles.content}>
               <View style={styles.header}>
                 <Text style={styles.titleGreen}>이메일을 확인하세요</Text>
                 <Text style={styles.subtitle}>
-                  이메일에 전송된 코드를 입력하세요
+                  메일로 전송된 6자리 인증 코드를 입력해주세요.
                 </Text>
               </View>
 
@@ -249,16 +336,15 @@ export default function ForgotPasswordScreen() {
                         key={index}
                         style={[
                           styles.codeBox,
-                          codeError && styles.codeBoxError,
+                          codeError ? styles.codeBoxError : null,
                         ]}
                       >
-                        <Text style={styles.codeText}>{digit ? "*" : ""}</Text>
+                        <Text style={styles.codeText}>{digit}</Text>
                       </View>
                     ))}
                   </View>
                 </TouchableOpacity>
 
-                {/* 숨겨진 입력 필드 */}
                 <TextInput
                   ref={codeInputRef}
                   style={styles.hiddenInput}
@@ -269,6 +355,9 @@ export default function ForgotPasswordScreen() {
                   autoFocus
                 />
 
+                {codeError ? (
+                  <Text style={styles.errorTextCentered}>{codeError}</Text>
+                ) : null}
                 {resendMessage ? (
                   <Text style={styles.successText}>{resendMessage}</Text>
                 ) : null}
@@ -278,48 +367,37 @@ export default function ForgotPasswordScreen() {
                 <TouchableOpacity
                   style={styles.resendButton}
                   onPress={handleResend}
+                  disabled={isLoading}
                 >
                   <Text style={styles.resendButtonText}>재전송</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[
                     styles.completeButton,
-                    isCodeComplete && styles.buttonActive,
+                    isCodeComplete && !isLoading ? styles.buttonActive : null,
                   ]}
                   onPress={handleVerifyCode}
-                  disabled={!isCodeComplete}
+                  disabled={!isCodeComplete || isLoading}
                 >
-                  <Text
-                    style={[
-                      styles.buttonText,
-                      isCodeComplete && styles.buttonTextActive,
-                    ]}
-                  >
-                    완료
+                  <Text style={styles.buttonText}>
+                    {isLoading ? "확인 중..." : "완료"}
                   </Text>
                 </TouchableOpacity>
               </View>
             </View>
-          )}
+          ) : null}
 
-          {/* Step 3: 비밀번호 재설정 */}
-          {step === "reset" && (
+          {step === "reset" ? (
             <View style={styles.content}>
               <View style={styles.header}>
                 <Text style={styles.titleGreen}>비밀번호 재설정</Text>
-                <Text style={styles.subtitle}>
-                  'AIQ'에 가입했던 이메일을 입력해주세요
-                </Text>
+                <Text style={styles.subtitle}>새 비밀번호를 입력해주세요.</Text>
               </View>
 
               <View style={styles.formArea}>
                 <View style={styles.inputContainer}>
                   <Text style={styles.label}>이메일</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={email}
-                    editable={false}
-                  />
+                  <TextInput style={styles.input} value={email} editable={false} />
                 </View>
 
                 <View style={styles.inputContainer}>
@@ -329,13 +407,13 @@ export default function ForgotPasswordScreen() {
                       style={[
                         styles.input,
                         styles.passwordInput,
-                        passwordError && styles.inputError,
+                        passwordError ? styles.inputError : null,
                       ]}
-                      placeholder="소문자, 숫자, 특수문자 포함 8-16자"
+                      placeholder="영문, 숫자, 특수문자를 포함해 8~16자"
                       placeholderTextColor={AppColors.gray}
                       value={password}
-                      onChangeText={(text) => {
-                        setPassword(text);
+                      onChangeText={(value) => {
+                        setPassword(value);
                         setPasswordError("");
                       }}
                       onBlur={handlePasswordBlur}
@@ -344,7 +422,7 @@ export default function ForgotPasswordScreen() {
                     />
                     <TouchableOpacity
                       style={styles.eyeIcon}
-                      onPress={() => setShowPassword(!showPassword)}
+                      onPress={() => setShowPassword((prev) => !prev)}
                     >
                       <Image
                         source={
@@ -368,13 +446,13 @@ export default function ForgotPasswordScreen() {
                       style={[
                         styles.input,
                         styles.passwordInput,
-                        passwordConfirmError && styles.inputError,
+                        passwordConfirmError ? styles.inputError : null,
                       ]}
                       placeholder="비밀번호를 한 번 더 입력하세요"
                       placeholderTextColor={AppColors.gray}
                       value={passwordConfirm}
-                      onChangeText={(text) => {
-                        setPasswordConfirm(text);
+                      onChangeText={(value) => {
+                        setPasswordConfirm(value);
                         setPasswordConfirmError("");
                       }}
                       onBlur={handlePasswordConfirmBlur}
@@ -383,9 +461,7 @@ export default function ForgotPasswordScreen() {
                     />
                     <TouchableOpacity
                       style={styles.eyeIcon}
-                      onPress={() =>
-                        setShowPasswordConfirm(!showPasswordConfirm)
-                      }
+                      onPress={() => setShowPasswordConfirm((prev) => !prev)}
                     >
                       <Image
                         source={
@@ -405,23 +481,18 @@ export default function ForgotPasswordScreen() {
                 <TouchableOpacity
                   style={[
                     styles.button,
-                    isPasswordValid && styles.buttonActive,
+                    isPasswordValid && !isLoading ? styles.buttonActive : null,
                   ]}
                   onPress={handleResetPassword}
-                  disabled={!isPasswordValid}
+                  disabled={!isPasswordValid || isLoading}
                 >
-                  <Text
-                    style={[
-                      styles.buttonText,
-                      isPasswordValid && styles.buttonTextActive,
-                    ]}
-                  >
-                    로그인 하러가기
+                  <Text style={styles.buttonText}>
+                    {isLoading ? "재설정 중..." : "로그인하러 가기"}
                   </Text>
                 </TouchableOpacity>
               </View>
             </View>
-          )}
+          ) : null}
         </View>
       </SafeAreaView>
     </TouchableWithoutFeedback>
@@ -494,12 +565,24 @@ const styles = StyleSheet.create({
     color: AppColors.white,
   },
   inputError: {
-    borderColor: "#FF6666",
+    borderColor: AppColors.error,
   },
   errorText: {
     fontSize: 12,
-    color: "#FF6666",
+    color: AppColors.error,
     marginTop: 6,
+  },
+  errorTextCentered: {
+    fontSize: 12,
+    color: AppColors.error,
+    textAlign: "center",
+    marginTop: 12,
+  },
+  successText: {
+    fontSize: 12,
+    color: AppColors.primaryGreen,
+    textAlign: "center",
+    marginTop: 8,
   },
   button: {
     width: "100%",
@@ -517,15 +600,12 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: AppColors.white,
   },
-  buttonTextActive: {
-    color: AppColors.white,
-  },
-  // Step 2: 코드 입력
   codeArea: {
     paddingHorizontal: 30,
-    alignItems: "flex-end",
+    alignItems: "center",
   },
   timer: {
+    alignSelf: "flex-end",
     fontSize: 16,
     color: AppColors.white,
     fontWeight: "600",
@@ -547,25 +627,19 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   codeBoxError: {
-    borderColor: "#FF6666",
+    borderColor: AppColors.error,
   },
   codeText: {
     fontSize: 30,
     color: AppColors.white,
     fontWeight: "600",
     textAlign: "center",
-    lineHeight: 63,
+    lineHeight: 34,
   },
   hiddenInput: {
     position: "absolute",
     opacity: 0,
     height: 0,
-  },
-  successText: {
-    fontSize: 12,
-    color: AppColors.primaryGreen,
-    textAlign: "center",
-    marginTop: 8,
   },
   bottomButtons: {
     flexDirection: "row",
@@ -594,7 +668,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-  // 비밀번호 관련
   passwordContainer: {
     position: "relative",
   },

@@ -1,7 +1,7 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
-import * as SecureStore from "expo-secure-store";
 import { useEffect } from "react";
 import { Alert, Text, View } from "react-native";
+import { saveAuthTokens } from "@/lib/auth-storage";
 
 export default function OAuthCallbackScreen() {
   const router = useRouter();
@@ -23,8 +23,7 @@ export default function OAuthCallbackScreen() {
         }
 
         // ✅ SecureStore에 토큰 저장
-        await SecureStore.setItemAsync("accessToken", accessToken);
-        await SecureStore.setItemAsync("refreshToken", refreshToken);
+        await saveAuthTokens(accessToken, refreshToken);
 
         // ✅ 메인 화면 이동
         router.replace("/(auth)/onboarding");

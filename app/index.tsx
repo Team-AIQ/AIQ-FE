@@ -56,7 +56,7 @@ export default function SplashScreen() {
           <Image
             source={require("../assets/images/aiq-animation-logo.gif")}
             style={styles.beamLogo}
-            contentFit="contain"
+            resizeMode="contain"
           />
         </View>
 

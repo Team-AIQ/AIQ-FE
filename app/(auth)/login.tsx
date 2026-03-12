@@ -18,6 +18,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { AppColors } from "@/constants/theme";
 import { API_ENDPOINTS } from "@/constants/api";
+import { saveAuthTokens } from "@/lib/auth-storage";
 
 const { width, height } = Dimensions.get("window");
 
@@ -29,6 +30,28 @@ export default function LoginScreen() {
   const [autoLogin, setAutoLogin] = useState(false);
 
   const isFormValid = email.length > 0 && password.length > 0;
+
+  const getTokenValue = (
+    payload: unknown,
+    key: "accessToken" | "refreshToken",
+  ): string | undefined => {
+    if (!payload || typeof payload !== "object") return undefined;
+
+    const record = payload as Record<string, unknown>;
+    const directValue = record[key];
+    if (typeof directValue === "string" && directValue.length > 0) {
+      return directValue;
+    }
+
+    const nestedData = record.data;
+    if (!nestedData || typeof nestedData !== "object") return undefined;
+
+    const nestedRecord = nestedData as Record<string, unknown>;
+    const nestedValue = nestedRecord[key];
+    return typeof nestedValue === "string" && nestedValue.length > 0
+      ? nestedValue
+      : undefined;
+  };
 
   const handleLogin = async () => {
     if (!isFormValid) return;
@@ -51,11 +74,17 @@ export default function LoginScreen() {
       }
 
       const data = await response.json();
-      const { accessToken, refreshToken } = data;
+      const accessToken = getTokenValue(data, "accessToken");
+      const refreshToken = getTokenValue(data, "refreshToken");
+
+      if (!accessToken || !refreshToken) {
+        console.log("Login response payload:", JSON.stringify(data));
+        Alert.alert("로그인 실패", "토큰 응답 형식이 올바르지 않습니다.");
+        return;
+      }
 
       // 토큰 저장
-      await AsyncStorage.setItem("accessToken", accessToken);
-      await AsyncStorage.setItem("refreshToken", refreshToken);
+      await saveAuthTokens(accessToken, refreshToken);
 
       // 자동 로그인 선택 시 (선택사항)
       if (autoLogin) {
