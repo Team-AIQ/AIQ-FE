@@ -24,3 +24,12 @@ export async function getAccessToken() {
 
   return secureToken;
 }
+
+export async function clearAuthTokens() {
+  await Promise.all([
+    AsyncStorage.removeItem("accessToken"),
+    AsyncStorage.removeItem("refreshToken"),
+    SecureStore.deleteItemAsync("accessToken"),
+    SecureStore.deleteItemAsync("refreshToken"),
+  ]);
+}

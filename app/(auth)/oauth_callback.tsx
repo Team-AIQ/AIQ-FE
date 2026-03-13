@@ -1,12 +1,10 @@
+import { saveAuthTokens } from "@/lib/auth-storage";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect } from "react";
 import { Alert, Text, View } from "react-native";
-import { saveAuthTokens } from "@/lib/auth-storage";
 
 export default function OAuthCallbackScreen() {
   const router = useRouter();
-
-  // ✅ expo-router 방식의 쿼리 파라미터 수신
   const { accessToken, refreshToken } = useLocalSearchParams<{
     accessToken?: string;
     refreshToken?: string;
@@ -15,27 +13,23 @@ export default function OAuthCallbackScreen() {
   useEffect(() => {
     const handleCallback = async () => {
       try {
-        // 파라미터 검증
         if (!accessToken || !refreshToken) {
-          Alert.alert("로그인 실패", "토큰을 받지 못했습니다.");
+          Alert.alert("로그인 실패", "토큰을 전달받지 못했습니다.");
           router.replace("/(auth)/login");
           return;
         }
 
-        // ✅ SecureStore에 토큰 저장
         await saveAuthTokens(accessToken, refreshToken);
-
-        // ✅ 메인 화면 이동
         router.replace("/(auth)/onboarding");
       } catch (error) {
-        console.error("OAuth Callback Error:", error);
-        Alert.alert("로그인 오류", "로그인 처리 중 오류가 발생했습니다.");
+        console.error("OAuth callback error:", error);
+        Alert.alert("로그인 오류", "로그인 처리 중 문제가 발생했습니다.");
         router.replace("/(auth)/login");
       }
     };
 
     handleCallback();
-  }, [accessToken, refreshToken]);
+  }, [accessToken, refreshToken, router]);
 
   return (
     <View

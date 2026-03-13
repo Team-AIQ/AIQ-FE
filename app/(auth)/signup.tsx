@@ -2,6 +2,7 @@ import { LegalModal } from "@/components/legal-modal";
 import { API_ENDPOINTS } from "@/constants/api";
 import { PRIVACY_POLICY } from "@/constants/legal";
 import { AppColors } from "@/constants/theme";
+import { saveUserProfile } from "@/lib/user-session";
 import { useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useState } from "react";
@@ -173,6 +174,11 @@ export default function SignupScreen() {
         setEmailError(errorText || "이미 사용 중인 이메일입니다.");
         return;
       }
+
+      await saveUserProfile({
+        nickname: nickname.trim(),
+        email: email.trim(),
+      });
 
       Alert.alert("회원가입 성공", "로그인 화면으로 이동합니다.", [
         {

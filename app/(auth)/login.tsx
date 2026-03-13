@@ -19,6 +19,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { AppColors } from "@/constants/theme";
 import { API_ENDPOINTS } from "@/constants/api";
 import { saveAuthTokens } from "@/lib/auth-storage";
+import { updateUserProfile } from "@/lib/user-session";
 
 const { width, height } = Dimensions.get("window");
 
@@ -85,6 +86,7 @@ export default function LoginScreen() {
 
       // 토큰 저장
       await saveAuthTokens(accessToken, refreshToken);
+      await updateUserProfile({ email });
 
       // 자동 로그인 선택 시 (선택사항)
       if (autoLogin) {
