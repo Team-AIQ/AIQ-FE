@@ -2,7 +2,7 @@ import { MenuDrawer } from "@/components/menu-drawer";
 import { API_ENDPOINTS } from "@/constants/api";
 import { AppColors } from "@/constants/theme";
 import { clearAuthTokens, getAccessToken } from "@/lib/auth-storage";
-import { apiRequest } from "@/lib/api-client";
+import { apiRequest, isApiError } from "@/lib/api-client";
 import {
   buildReportSession,
   CategoryQuestion,
@@ -23,6 +23,7 @@ import {
   setCredits,
   UserProfile,
 } from "@/lib/user-session";
+import type { CurationAnswerResponse, CurationResponse } from "@/types/api";
 import { useFocusEffect } from "@react-navigation/native";
 import { jwtDecode } from "jwt-decode";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -49,19 +50,6 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 const { height } = Dimensions.get("window");
 
-type CurationResponse = {
-  queryId: number;
-  categoryName: string;
-  questions: CategoryQuestion[];
-  message: string;
-};
-
-type CurationAnswerResponse = Partial<CurationResponse> & {
-  done?: boolean;
-  reportReady?: boolean;
-  nextQuestion?: CategoryQuestion | null;
-};
-
 type Message = {
   id: string;
   type: "user" | "ai";
@@ -76,17 +64,13 @@ const DEFAULT_PROVIDER_SETTINGS: AIProviderSettings = {
   perplexity: true,
 };
 
-const HELP_TEXT_DISPLAY = [
+const HELP_TEXT = [
   "검색하고 싶은 제품 조건을 자연스럽게 입력하면 AIQ가 카테고리 질문을 이어갑니다.",
   "리포트가 생성되면 Chat GPT, Gemini, Perplexity 관점의 추천 결과를 비교할 수 있습니다.",
   "메뉴에서 AI 응답 설정, 크레딧, 최근 대화, 프로필 편집을 관리할 수 있습니다.",
 ];
 
-const HELP_TEXT = [
-  "검색창에 원하는 제품 조건을 자연스럽게 입력하면 AIQ가 카테고리 질문을 이어갑니다.",
-  "리포트가 생성되면 Chat GPT, Gemini, Perplexity 관점의 추천 결과를 비교할 수 있습니다.",
-  "메뉴에서 AI 응답 토글, 크레딧, 최근 대화, 프로필 편집을 관리할 수 있습니다.",
-];
+const REPORT_CREATING_MESSAGE = "리포트를 생성하고 있어요. 잠시만 기다려 주세요.";
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -308,7 +292,7 @@ export default function HomeScreen() {
     appendMessage({
       id: `${Date.now()}-complete`,
       type: "ai",
-      text: "리포트를 생성하고 있어요. 잠시만 기다려 주세요.",
+      text: REPORT_CREATING_MESSAGE,
       timestamp: new Date(),
     });
     scrollToBottom();
@@ -362,7 +346,7 @@ export default function HomeScreen() {
         appendMessage({
           id: `${Date.now()}-complete`,
           type: "ai",
-          text: "리포트를 생성하고 있어요. 잠시만 기다려 주세요.",
+          text: REPORT_CREATING_MESSAGE,
           timestamp: new Date(),
         });
         scrollToBottom();
@@ -403,13 +387,12 @@ export default function HomeScreen() {
       appendMessage({
         id: `${Date.now()}-complete`,
         type: "ai",
-        text: "리포트를 생성하고 있어요. 잠시만 기다려 주세요.",
+        text: REPORT_CREATING_MESSAGE,
         timestamp: new Date(),
       });
       scrollToBottom();
       await completeReportFlow(nextQuestions);
-    } catch (error) {
-      console.log("Curation answer fallback:", error);
+    } catch {
       await askNextQuestionLocal(answer);
     }
   };
@@ -425,23 +408,15 @@ export default function HomeScreen() {
       }
 
       const decoded = jwtDecode<{ userId: number }>(accessToken);
-      const response = await fetch(API_ENDPOINTS.CURATION_START, {
+      const data = await apiRequest<CurationResponse>(API_ENDPOINTS.CURATION_START, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${accessToken}`,
-        },
-        body: JSON.stringify({
+        requireAuth: true,
+        body: {
           userId: decoded.userId,
           question: questionText,
-        }),
+        },
       });
 
-      if (!response.ok) {
-        throw new Error("큐레이션 요청에 실패했습니다.");
-      }
-
-      const data: CurationResponse = await response.json();
       setCurationData(data);
       setCurrentQuestionIndex(0);
       setInitialQuestion(questionText);
@@ -467,8 +442,10 @@ export default function HomeScreen() {
 
       scrollToBottom();
     } catch (error) {
-      console.error("Curation error:", error);
-      Alert.alert("오류", "서버와 연결할 수 없습니다.");
+      Alert.alert(
+        "오류",
+        isApiError(error) ? error.message : "서버와 연결할 수 없습니다.",
+      );
       appendMessage({
         id: `${Date.now()}-error`,
         type: "ai",
@@ -527,7 +504,7 @@ export default function HomeScreen() {
     const nextValue = credits + 1;
     await syncCredits(nextValue);
     setCreditsOpen(false);
-    Alert.alert("크레딧 적립", "광고 시청 보상으로 1 크레딧이 적립됐습니다.");
+    Alert.alert("크레딧 적립", "광고 시청 보상으로 1 크레딧이 적립되었습니다.");
   };
 
   const handleLogout = async () => {
@@ -647,7 +624,7 @@ export default function HomeScreen() {
             resizeMode="contain"
           />
         </Animated.View>
-        <Text style={styles.characterSubtitle}>만나서 반가워요. 난 피클이야.</Text>
+        <Text style={styles.characterSubtitle}>만나서 반가워! 난 피클이야.</Text>
         <Text style={styles.characterSubtitle}>
           필요한 제품 조건을 말해주면 질문을 이어갈게.
         </Text>
@@ -702,7 +679,7 @@ export default function HomeScreen() {
             >
               <View style={styles.tooltip}>
                 <Text style={styles.tooltipText}>
-                  검색하려는 제품 조건을 입력해 보세요
+                  검색하고 싶은 제품 조건을 입력해 보세요
                 </Text>
               </View>
               <View style={styles.tooltipArrow} />
@@ -785,7 +762,7 @@ export default function HomeScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>도움말</Text>
-            {HELP_TEXT_DISPLAY.map((line) => (
+            {HELP_TEXT.map((line) => (
               <Text key={line} style={styles.modalBody}>
                 • {line}
               </Text>
@@ -808,7 +785,8 @@ export default function HomeScreen() {
             <Text style={styles.modalTitle}>크레딧</Text>
             <Text style={styles.creditNumber}>{credits} credits</Text>
             <Text style={styles.modalBody}>
-              리포트 생성 시 20 크레딧이 차감됩니다. 광고 보기 버튼으로 1 크레딧을 적립할 수 있습니다.
+              리포트 생성 시 20 크레딧이 차감됩니다. 광고 보기 버튼으로 1 크레딧을
+              적립할 수 있습니다.
             </Text>
             <TouchableOpacity style={styles.modalButton} onPress={handleCreditReward}>
               <Text style={styles.modalButtonText}>광고 보고 1C 받기</Text>

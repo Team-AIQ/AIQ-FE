@@ -2,6 +2,7 @@ import { LegalModal } from "@/components/legal-modal";
 import { API_ENDPOINTS } from "@/constants/api";
 import { PRIVACY_POLICY } from "@/constants/legal";
 import { AppColors } from "@/constants/theme";
+import { apiRequest, isApiError } from "@/lib/api-client";
 import { saveUserProfile } from "@/lib/user-session";
 import { useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
@@ -24,6 +25,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 const { width, height } = Dimensions.get("window");
 
+type EmailStatus = "idle" | "sending" | "sent" | "verified";
+
 export default function SignupScreen() {
   const router = useRouter();
   const [nickname, setNickname] = useState("");
@@ -37,9 +40,7 @@ export default function SignupScreen() {
   const [emailError, setEmailError] = useState("");
   const [passwordError, setPasswordError] = useState("");
   const [passwordConfirmError, setPasswordConfirmError] = useState("");
-  const [emailStatus, setEmailStatus] = useState<
-    "idle" | "sending" | "sent" | "verified"
-  >("idle");
+  const [emailStatus, setEmailStatus] = useState<EmailStatus>("idle");
   const [emailStatusMessage, setEmailStatusMessage] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isCheckingEmail, setIsCheckingEmail] = useState(false);
@@ -54,7 +55,7 @@ export default function SignupScreen() {
 
   const handlePasswordBlur = () => {
     if (password && !validatePassword(password)) {
-      setPasswordError("영문, 숫자, 특수문자를 포함해 8~16자로 입력해주세요.");
+      setPasswordError("영문, 숫자, 특수문자를 포함한 8~16자로 입력해 주세요.");
       return;
     }
 
@@ -72,7 +73,7 @@ export default function SignupScreen() {
 
   const handleSendVerification = async () => {
     if (!isValidEmail) {
-      setEmailError("올바른 이메일을 입력해주세요.");
+      setEmailError("올바른 이메일을 입력해 주세요.");
       return;
     }
 
@@ -81,32 +82,24 @@ export default function SignupScreen() {
     setEmailStatusMessage("");
 
     try {
-      const response = await fetch(API_ENDPOINTS.EMAIL_REQUEST, {
+      await apiRequest(API_ENDPOINTS.EMAIL_REQUEST, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ email }),
+        body: { email },
       });
 
-      if (!response.ok) {
-        const message = await response.text();
-        throw new Error(message || "인증 메일 발송에 실패했습니다.");
-      }
-
       setEmailStatus("sent");
-      setEmailStatusMessage("인증 메일을 발송했습니다. 메일의 링크를 확인해주세요.");
+      setEmailStatusMessage("인증 메일을 발송했습니다. 메일의 링크를 확인해 주세요.");
     } catch (error) {
       setEmailStatus("idle");
       setEmailError(
-        error instanceof Error ? error.message : "인증 메일 발송에 실패했습니다.",
+        isApiError(error) ? error.message : "인증 메일 발송에 실패했습니다.",
       );
     }
   };
 
   const handleCheckVerification = async () => {
     if (!isValidEmail) {
-      setEmailError("올바른 이메일을 입력해주세요.");
+      setEmailError("올바른 이메일을 입력해 주세요.");
       return;
     }
 
@@ -114,24 +107,16 @@ export default function SignupScreen() {
     setIsCheckingEmail(true);
 
     try {
-      const response = await fetch(API_ENDPOINTS.VERIFY_LINK, {
+      await apiRequest(API_ENDPOINTS.VERIFY_LINK, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ email }),
+        body: { email },
       });
-
-      if (!response.ok) {
-        const message = await response.text();
-        throw new Error(message || "아직 이메일 인증이 완료되지 않았습니다.");
-      }
 
       setEmailStatus("verified");
       setEmailStatusMessage("이메일 인증이 완료되었습니다.");
     } catch (error) {
       setEmailError(
-        error instanceof Error ? error.message : "이메일 인증 상태를 확인할 수 없습니다.",
+        isApiError(error) ? error.message : "이메일 인증 상태를 확인할 수 없습니다.",
       );
     } finally {
       setIsCheckingEmail(false);
@@ -150,30 +135,21 @@ export default function SignupScreen() {
 
   const handleSignup = async () => {
     if (!isFormValid) {
-      Alert.alert("입력 확인", "모든 항목을 올바르게 입력해주세요.");
+      Alert.alert("입력 확인", "모든 항목을 올바르게 입력해 주세요.");
       return;
     }
 
     setIsLoading(true);
 
     try {
-      const response = await fetch(API_ENDPOINTS.SIGNUP, {
+      await apiRequest(API_ENDPOINTS.SIGNUP, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
+        body: {
           email,
           password,
           nickname,
-        }),
+        },
       });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        setEmailError(errorText || "이미 사용 중인 이메일입니다.");
-        return;
-      }
 
       await saveUserProfile({
         nickname: nickname.trim(),
@@ -187,8 +163,11 @@ export default function SignupScreen() {
         },
       ]);
     } catch (error) {
-      console.error("Signup error:", error);
-      Alert.alert("오류", "서버와 연결할 수 없습니다.");
+      if (isApiError(error)) {
+        setEmailError(error.message);
+      } else {
+        Alert.alert("오류", "서버와 연결할 수 없습니다.");
+      }
     } finally {
       setIsLoading(false);
     }
@@ -223,7 +202,7 @@ export default function SignupScreen() {
           <View style={styles.profileImageContainer}>
             <View style={styles.profileImageCircle}>
               <View style={styles.profileIcon}>
-                <Text style={styles.profileIconText}>🙂</Text>
+                <Text style={styles.profileIconText}>👤</Text>
               </View>
             </View>
           </View>
@@ -324,7 +303,7 @@ export default function SignupScreen() {
                   styles.passwordInput,
                   passwordError ? styles.inputError : null,
                 ]}
-                placeholder="영문, 숫자, 특수문자를 포함해 8~16자"
+                placeholder="영문, 숫자, 특수문자를 포함한 8~16자"
                 placeholderTextColor={AppColors.gray}
                 value={password}
                 onChangeText={(value) => {
@@ -363,7 +342,7 @@ export default function SignupScreen() {
                   styles.passwordInput,
                   passwordConfirmError ? styles.inputError : null,
                 ]}
-                placeholder="비밀번호를 한 번 더 입력하세요"
+                placeholder="비밀번호를 한 번 더 입력해 주세요"
                 placeholderTextColor={AppColors.gray}
                 value={passwordConfirm}
                 onChangeText={(value) => {
@@ -402,7 +381,7 @@ export default function SignupScreen() {
             >
               {agreeTerms ? <Text style={styles.checkmark}>✓</Text> : null}
             </View>
-            <Text style={styles.checkboxLabel}>개인정보 이용에 동의합니다.</Text>
+            <Text style={styles.checkboxLabel}>개인정보 이용에 동의합니다</Text>
             <TouchableOpacity
               style={styles.detailButton}
               onPress={() => setLegalOpen(true)}
@@ -418,7 +397,6 @@ export default function SignupScreen() {
             ]}
             onPress={handleSignup}
             disabled={!isFormValid || isLoading}
-            activeOpacity={0.8}
           >
             {isLoading ? (
               <ActivityIndicator color={AppColors.white} />
@@ -426,8 +404,6 @@ export default function SignupScreen() {
               <Text style={styles.signupButtonText}>회원가입</Text>
             )}
           </TouchableOpacity>
-
-          <View style={styles.bottomSpacer} />
         </ScrollView>
       </KeyboardAvoidingView>
 
@@ -450,14 +426,11 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: AppColors.black,
   },
-  scrollView: {
-    flex: 1,
-  },
   backButton: {
     position: "absolute",
     top: 30,
-    left: 30,
-    zIndex: 15,
+    left: 20,
+    zIndex: 10,
     padding: 15,
   },
   backIconImage: {
@@ -465,62 +438,69 @@ const styles = StyleSheet.create({
     height: 20,
     tintColor: AppColors.white,
   },
+  scrollView: {
+    flex: 1,
+  },
   header: {
-    alignItems: "center",
-    marginTop: 20,
-    marginBottom: 30,
+    paddingHorizontal: 43,
+    paddingTop: 90,
+    marginBottom: 20,
   },
   title: {
-    fontSize: 22,
-    fontWeight: "600",
     color: AppColors.white,
+    fontSize: 24,
+    fontWeight: "700",
   },
   profileImageContainer: {
     alignItems: "center",
-    marginBottom: 40,
-    position: "relative",
+    marginBottom: 30,
   },
   profileImageCircle: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    borderWidth: 2,
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    borderWidth: 1.5,
     borderColor: AppColors.white,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: AppColors.black,
   },
   profileIcon: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
     justifyContent: "center",
     alignItems: "center",
   },
   profileIconText: {
-    fontSize: 48,
+    fontSize: 40,
   },
   inputContainer: {
-    paddingHorizontal: 40,
-    marginBottom: 20,
+    paddingHorizontal: 43,
+    marginBottom: 18,
   },
   label: {
-    fontSize: 14,
     color: AppColors.white,
+    fontSize: 14,
     marginBottom: 8,
-    fontWeight: "500",
+    fontWeight: "600",
   },
   input: {
-    width: "100%",
-    height: 47,
-    backgroundColor: "transparent",
+    height: 50,
     borderWidth: 1,
     borderColor: AppColors.gray,
     borderRadius: 8,
     paddingHorizontal: 16,
-    fontSize: 13.5,
     color: AppColors.white,
+    fontSize: 14,
+  },
+  inputError: {
+    borderColor: "#FF6B6B",
+  },
+  verifiedInput: {
+    borderColor: AppColors.primaryGreen,
   },
   inlineRow: {
     flexDirection: "row",
-    alignItems: "center",
     gap: 10,
   },
   inlineInput: {
@@ -528,7 +508,7 @@ const styles = StyleSheet.create({
   },
   inlineButton: {
     minWidth: 92,
-    height: 47,
+    height: 50,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: AppColors.gray,
@@ -538,7 +518,7 @@ const styles = StyleSheet.create({
   },
   inlineButtonActive: {
     borderColor: AppColors.primaryGreen,
-    backgroundColor: "rgba(63, 221, 144, 0.15)",
+    backgroundColor: "rgba(63, 221, 144, 0.12)",
   },
   inlineButtonText: {
     color: AppColors.white,
@@ -547,7 +527,7 @@ const styles = StyleSheet.create({
   },
   verifyStatusButton: {
     marginTop: 10,
-    height: 40,
+    height: 44,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: AppColors.gray,
@@ -556,18 +536,11 @@ const styles = StyleSheet.create({
   },
   verifyStatusButtonActive: {
     borderColor: AppColors.primaryGreen,
-    backgroundColor: "rgba(63, 221, 144, 0.15)",
   },
   verifyStatusButtonText: {
     color: AppColors.white,
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: "600",
-  },
-  verifiedInput: {
-    borderColor: AppColors.primaryGreen,
-  },
-  inputError: {
-    borderColor: AppColors.error,
   },
   passwordContainer: {
     position: "relative",
@@ -578,23 +551,25 @@ const styles = StyleSheet.create({
   eyeIcon: {
     position: "absolute",
     right: 12,
-    top: 8.5,
+    top: 10,
     padding: 4,
   },
   eyeIconImage: {
-    width: 24,
-    height: 24,
+    width: 22,
+    height: 22,
     tintColor: AppColors.gray,
   },
   errorText: {
+    color: "#FF6B6B",
     fontSize: 12,
-    color: AppColors.error,
-    marginTop: 6,
+    marginTop: 8,
+    lineHeight: 18,
   },
   statusText: {
-    fontSize: 12,
     color: AppColors.gray,
-    marginTop: 6,
+    fontSize: 12,
+    marginTop: 8,
+    lineHeight: 18,
   },
   statusTextSuccess: {
     color: AppColors.primaryGreen,
@@ -602,61 +577,57 @@ const styles = StyleSheet.create({
   checkboxContainer: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 40,
-    marginTop: 20,
-    marginBottom: 40,
+    paddingHorizontal: 43,
+    marginTop: 6,
+    marginBottom: 28,
   },
   checkbox: {
     width: 20,
     height: 20,
-    borderWidth: 1.5,
-    borderColor: AppColors.gray,
     borderRadius: 4,
-    marginRight: 8,
+    borderWidth: 1,
+    borderColor: AppColors.gray,
     justifyContent: "center",
     alignItems: "center",
+    marginRight: 10,
   },
   checkboxChecked: {
-    backgroundColor: AppColors.primaryGreen,
     borderColor: AppColors.primaryGreen,
+    backgroundColor: AppColors.primaryGreen,
   },
   checkmark: {
-    color: AppColors.white,
-    fontSize: 14,
-    fontWeight: "bold",
+    color: AppColors.black,
+    fontSize: 12,
+    fontWeight: "700",
   },
   checkboxLabel: {
     flex: 1,
-    fontSize: 14,
     color: AppColors.white,
+    fontSize: 13,
   },
   detailButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 4,
+    paddingLeft: 8,
   },
   detailButtonText: {
+    color: AppColors.primaryGreen,
     fontSize: 13,
-    color: AppColors.white,
     textDecorationLine: "underline",
   },
   signupButton: {
-    marginHorizontal: 40,
-    marginTop: -25,
     height: 52,
-    backgroundColor: AppColors.gray,
+    marginHorizontal: 43,
     borderRadius: 8,
+    backgroundColor: AppColors.gray,
     justifyContent: "center",
     alignItems: "center",
+    marginBottom: 30,
   },
   signupButtonActive: {
     backgroundColor: AppColors.primaryGreen,
   },
   signupButtonText: {
-    fontSize: 16,
-    fontWeight: "600",
     color: AppColors.white,
-  },
-  bottomSpacer: {
-    height: 40,
+    fontSize: 16,
+    fontWeight: "700",
   },
 });

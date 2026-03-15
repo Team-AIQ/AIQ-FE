@@ -1,25 +1,26 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { API_ENDPOINTS } from "@/constants/api";
+import { AppColors } from "@/constants/theme";
+import { apiRequest, isApiError } from "@/lib/api-client";
+import { saveAuthTokens } from "@/lib/auth-storage";
+import { updateUserProfile } from "@/lib/user-session";
+import type { LoginResponse } from "@/types/api";
 import { useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useState } from "react";
 import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  TextInput,
-  Image,
-  Dimensions,
-  Keyboard,
-  TouchableWithoutFeedback,
   Alert,
-  ActivityIndicator,
+  Dimensions,
+  Image,
+  Keyboard,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  TouchableWithoutFeedback,
+  View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { AppColors } from "@/constants/theme";
-import { API_ENDPOINTS } from "@/constants/api";
-import { saveAuthTokens } from "@/lib/auth-storage";
-import { updateUserProfile } from "@/lib/user-session";
 
 const { width, height } = Dimensions.get("window");
 
@@ -29,78 +30,67 @@ export default function LoginScreen() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [autoLogin, setAutoLogin] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
   const isFormValid = email.length > 0 && password.length > 0;
 
   const getTokenValue = (
-    payload: unknown,
+    payload: LoginResponse,
     key: "accessToken" | "refreshToken",
   ): string | undefined => {
-    if (!payload || typeof payload !== "object") return undefined;
-
-    const record = payload as Record<string, unknown>;
-    const directValue = record[key];
+    const directValue = payload[key];
     if (typeof directValue === "string" && directValue.length > 0) {
       return directValue;
     }
 
-    const nestedData = record.data;
-    if (!nestedData || typeof nestedData !== "object") return undefined;
-
-    const nestedRecord = nestedData as Record<string, unknown>;
-    const nestedValue = nestedRecord[key];
+    const nestedValue = payload.data?.[key];
     return typeof nestedValue === "string" && nestedValue.length > 0
       ? nestedValue
       : undefined;
   };
 
   const handleLogin = async () => {
-    if (!isFormValid) return;
+    if (!isFormValid || isLoading) return;
+
+    setIsLoading(true);
 
     try {
-      const response = await fetch(API_ENDPOINTS.LOGIN, {
+      const data = await apiRequest<LoginResponse>(API_ENDPOINTS.LOGIN, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
+        body: {
           email,
           password,
-        }),
+        },
       });
 
-      if (!response.ok) {
-        Alert.alert("로그인 실패", "이메일 또는 비밀번호를 확인해주세요.");
-        return;
-      }
-
-      const data = await response.json();
       const accessToken = getTokenValue(data, "accessToken");
       const refreshToken = getTokenValue(data, "refreshToken");
 
       if (!accessToken || !refreshToken) {
-        console.log("Login response payload:", JSON.stringify(data));
         Alert.alert("로그인 실패", "토큰 응답 형식이 올바르지 않습니다.");
         return;
       }
 
-      // 토큰 저장
       await saveAuthTokens(accessToken, refreshToken);
       await updateUserProfile({ email });
 
-      // 자동 로그인 선택 시 (선택사항)
       if (autoLogin) {
         await AsyncStorage.setItem("autoLogin", "true");
+      } else {
+        await AsyncStorage.removeItem("autoLogin");
       }
 
-      // 로그인 성공 → 온보딩 or 메인
       router.replace("/(auth)/onboarding");
     } catch (error) {
-      console.error("Login error:", error);
-      Alert.alert("오류", "서버와 연결할 수 없습니다.");
+      if (isApiError(error)) {
+        Alert.alert("로그인 실패", error.message);
+      } else {
+        Alert.alert("오류", "서버와 연결할 수 없습니다.");
+      }
+    } finally {
+      setIsLoading(false);
     }
   };
-
 
   return (
     <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
@@ -108,7 +98,6 @@ export default function LoginScreen() {
         <StatusBar style="light" />
 
         <View style={styles.container}>
-          {/* 뒤로가기 버튼 */}
           <TouchableOpacity
             style={styles.backButton}
             onPress={() => router.back()}
@@ -119,7 +108,6 @@ export default function LoginScreen() {
             />
           </TouchableOpacity>
 
-          {/* 로고 영역 */}
           <View style={styles.logoArea}>
             <Image
               source={require("../../assets/images/auth-logo.png")}
@@ -128,9 +116,7 @@ export default function LoginScreen() {
             />
           </View>
 
-          {/* 폼 영역 */}
           <View style={styles.formArea}>
-            {/* 이메일 입력 */}
             <View style={styles.inputContainer}>
               <TextInput
                 style={styles.input}
@@ -144,7 +130,6 @@ export default function LoginScreen() {
               />
             </View>
 
-            {/* 비밀번호 입력 */}
             <View style={styles.inputContainer}>
               <View style={styles.passwordContainer}>
                 <TextInput
@@ -173,7 +158,6 @@ export default function LoginScreen() {
               </View>
             </View>
 
-            {/* 자동 로그인 & 비밀번호 찾기 */}
             <View style={styles.optionsRow}>
               <TouchableOpacity
                 style={styles.checkboxContainer}
@@ -190,23 +174,20 @@ export default function LoginScreen() {
                 <Text style={styles.checkboxLabel}>자동 로그인</Text>
               </TouchableOpacity>
 
-              <TouchableOpacity
-                onPress={() => router.push("/(auth)/forgot-password")}
-              >
+              <TouchableOpacity onPress={() => router.push("/(auth)/forgot-password")}>
                 <Text style={styles.forgotPassword}>비밀번호찾기</Text>
               </TouchableOpacity>
             </View>
 
-            {/* 버튼 영역 - 간격 58.64 */}
             <View style={styles.buttonArea}>
-              {/* 로그인 버튼 */}
               <TouchableOpacity
                 style={[
                   styles.loginButton,
                   isFormValid && styles.loginButtonActive,
+                  isLoading && styles.disabledButton,
                 ]}
                 onPress={handleLogin}
-                disabled={!isFormValid}
+                disabled={!isFormValid || isLoading}
                 activeOpacity={0.8}
               >
                 <Text
@@ -215,15 +196,15 @@ export default function LoginScreen() {
                     isFormValid && styles.loginButtonTextActive,
                   ]}
                 >
-                  로그인
+                  {isLoading ? "로그인 중..." : "로그인"}
                 </Text>
               </TouchableOpacity>
 
-              {/* 회원가입 버튼 */}
               <TouchableOpacity
                 style={styles.signupButton}
                 onPress={() => router.push("/(auth)/signup")}
                 activeOpacity={0.8}
+                disabled={isLoading}
               >
                 <Text style={styles.signupButtonText}>회원가입</Text>
               </TouchableOpacity>
@@ -361,5 +342,8 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "600",
     color: AppColors.white,
+  },
+  disabledButton: {
+    opacity: 0.65,
   },
 });

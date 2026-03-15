@@ -1,5 +1,5 @@
-// .env 파일에서 API 주소를 가져옵니다.
-// EXPO_PUBLIC_ 접두사가 붙은 환경변수는 클라이언트에서도 접근 가능합니다.
+// `.env` 파일에서 API 주소를 읽습니다.
+// `EXPO_PUBLIC_` 접두사가 붙은 환경 변수는 앱 런타임에서도 접근할 수 있습니다.
 export const API_BASE_URL =
   process.env.EXPO_PUBLIC_API_BASE_URL || "http://localhost:8080";
 

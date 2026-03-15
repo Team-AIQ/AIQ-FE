@@ -1,5 +1,6 @@
 import { API_ENDPOINTS } from "@/constants/api";
 import { AppColors } from "@/constants/theme";
+import { apiRequest, isApiError } from "@/lib/api-client";
 import { useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useEffect, useRef, useState } from "react";
@@ -69,23 +70,15 @@ export default function ForgotPasswordScreen() {
   };
 
   const requestPasswordCode = async () => {
-    const response = await fetch(API_ENDPOINTS.PASSWORD_CODE_REQUEST, {
+    await apiRequest(API_ENDPOINTS.PASSWORD_CODE_REQUEST, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ email }),
+      body: { email },
     });
-
-    if (!response.ok) {
-      const message = await response.text();
-      throw new Error(message || "인증 코드를 보낼 수 없습니다.");
-    }
   };
 
   const handleSendCode = async () => {
     if (!isValidEmail) {
-      setEmailError("올바른 이메일을 입력해주세요.");
+      setEmailError("올바른 이메일을 입력해 주세요.");
       return;
     }
 
@@ -100,7 +93,7 @@ export default function ForgotPasswordScreen() {
       setCode(["", "", "", "", "", ""]);
     } catch (error) {
       setEmailError(
-        error instanceof Error ? error.message : "이메일을 확인해주세요.",
+        isApiError(error) ? error.message : "이메일을 확인해 주세요.",
       );
     } finally {
       setIsLoading(false);
@@ -129,7 +122,7 @@ export default function ForgotPasswordScreen() {
       setTimeout(() => setResendMessage(""), 3000);
     } catch (error) {
       setCodeError(
-        error instanceof Error ? error.message : "코드 재전송에 실패했습니다.",
+        isApiError(error) ? error.message : "코드 재전송에 실패했습니다.",
       );
     } finally {
       setIsLoading(false);
@@ -144,26 +137,20 @@ export default function ForgotPasswordScreen() {
     setCodeError("");
 
     try {
-      const response = await fetch(API_ENDPOINTS.PASSWORD_VERIFY, {
+      await apiRequest(API_ENDPOINTS.PASSWORD_VERIFY, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
+        body: {
           email,
           code: verificationCode,
-        }),
+        },
       });
-
-      if (!response.ok) {
-        const message = await response.text();
-        throw new Error(message || "인증 코드가 올바르지 않습니다.");
-      }
 
       setStep("reset");
     } catch (error) {
       setCodeError(
-        error instanceof Error ? error.message : "인증 코드가 올바르지 않습니다.",
+        isApiError(error)
+          ? error.message
+          : "인증 코드가 올바르지 않습니다.",
       );
     } finally {
       setIsLoading(false);
@@ -172,7 +159,7 @@ export default function ForgotPasswordScreen() {
 
   const handlePasswordBlur = () => {
     if (password && !validatePassword(password)) {
-      setPasswordError("영문, 숫자, 특수문자를 포함해 8~16자로 입력해주세요.");
+      setPasswordError("영문, 숫자, 특수문자를 포함한 8~16자로 입력해 주세요.");
       return;
     }
 
@@ -190,7 +177,7 @@ export default function ForgotPasswordScreen() {
 
   const handleResetPassword = async () => {
     if (!validatePassword(password)) {
-      setPasswordError("영문, 숫자, 특수문자를 포함해 8~16자로 입력해주세요.");
+      setPasswordError("영문, 숫자, 특수문자를 포함한 8~16자로 입력해 주세요.");
       return;
     }
 
@@ -202,24 +189,16 @@ export default function ForgotPasswordScreen() {
     setIsLoading(true);
 
     try {
-      const response = await fetch(API_ENDPOINTS.PASSWORD_RESET, {
+      await apiRequest(API_ENDPOINTS.PASSWORD_RESET, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
+        body: {
           email,
           password,
           passwordConfirm,
-        }),
+        },
       });
 
-      if (!response.ok) {
-        const message = await response.text();
-        throw new Error(message || "비밀번호 재설정에 실패했습니다.");
-      }
-
-      Alert.alert("재설정 완료", "새 비밀번호로 다시 로그인해주세요.", [
+      Alert.alert("재설정 완료", "새 비밀번호로 다시 로그인해 주세요.", [
         {
           text: "확인",
           onPress: () => router.replace("/(auth)/login"),
@@ -228,7 +207,9 @@ export default function ForgotPasswordScreen() {
     } catch (error) {
       Alert.alert(
         "오류",
-        error instanceof Error ? error.message : "비밀번호 재설정에 실패했습니다.",
+        isApiError(error)
+          ? error.message
+          : "비밀번호 재설정에 실패했습니다.",
       );
     } finally {
       setIsLoading(false);
@@ -274,7 +255,7 @@ export default function ForgotPasswordScreen() {
               <View style={styles.header}>
                 <Text style={styles.titleGreen}>비밀번호 재설정</Text>
                 <Text style={styles.subtitle}>
-                  AIQ에 가입한 이메일을 입력해주세요.
+                  AIQ에 가입한 이메일을 입력해 주세요.
                 </Text>
               </View>
 
@@ -319,7 +300,7 @@ export default function ForgotPasswordScreen() {
               <View style={styles.header}>
                 <Text style={styles.titleGreen}>이메일을 확인하세요</Text>
                 <Text style={styles.subtitle}>
-                  메일로 전송된 6자리 인증 코드를 입력해주세요.
+                  메일로 전송된 6자리 인증 코드를 입력해 주세요.
                 </Text>
               </View>
 
@@ -359,30 +340,35 @@ export default function ForgotPasswordScreen() {
                   <Text style={styles.errorTextCentered}>{codeError}</Text>
                 ) : null}
                 {resendMessage ? (
-                  <Text style={styles.successText}>{resendMessage}</Text>
+                  <Text style={styles.resendMessage}>{resendMessage}</Text>
                 ) : null}
-              </View>
 
-              <View style={styles.bottomButtons}>
-                <TouchableOpacity
-                  style={styles.resendButton}
-                  onPress={handleResend}
-                  disabled={isLoading}
-                >
-                  <Text style={styles.resendButtonText}>재전송</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[
-                    styles.completeButton,
-                    isCodeComplete && !isLoading ? styles.buttonActive : null,
-                  ]}
-                  onPress={handleVerifyCode}
-                  disabled={!isCodeComplete || isLoading}
-                >
-                  <Text style={styles.buttonText}>
-                    {isLoading ? "확인 중..." : "완료"}
-                  </Text>
-                </TouchableOpacity>
+                <View style={styles.codeButtonRow}>
+                  <TouchableOpacity
+                    style={[
+                      styles.secondaryActionButton,
+                      timer > 0 ? styles.secondaryActionButtonDisabled : null,
+                    ]}
+                    disabled={timer > 0 || isLoading}
+                    onPress={handleResend}
+                  >
+                    <Text style={styles.secondaryActionText}>재전송</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[
+                      styles.button,
+                      isCodeComplete && !isLoading ? styles.buttonActive : null,
+                      styles.codeConfirmButton,
+                    ]}
+                    disabled={!isCodeComplete || isLoading}
+                    onPress={handleVerifyCode}
+                  >
+                    <Text style={styles.buttonText}>
+                      {isLoading ? "확인 중..." : "완료"}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
               </View>
             </View>
           ) : null}
@@ -390,18 +376,15 @@ export default function ForgotPasswordScreen() {
           {step === "reset" ? (
             <View style={styles.content}>
               <View style={styles.header}>
-                <Text style={styles.titleGreen}>비밀번호 재설정</Text>
-                <Text style={styles.subtitle}>새 비밀번호를 입력해주세요.</Text>
+                <Text style={styles.titleGreen}>새 비밀번호 설정</Text>
+                <Text style={styles.subtitle}>
+                  새로운 비밀번호를 입력하고 다시 로그인하세요.
+                </Text>
               </View>
 
               <View style={styles.formArea}>
                 <View style={styles.inputContainer}>
-                  <Text style={styles.label}>이메일</Text>
-                  <TextInput style={styles.input} value={email} editable={false} />
-                </View>
-
-                <View style={styles.inputContainer}>
-                  <Text style={styles.label}>비밀번호</Text>
+                  <Text style={styles.label}>새 비밀번호</Text>
                   <View style={styles.passwordContainer}>
                     <TextInput
                       style={[
@@ -409,7 +392,7 @@ export default function ForgotPasswordScreen() {
                         styles.passwordInput,
                         passwordError ? styles.inputError : null,
                       ]}
-                      placeholder="영문, 숫자, 특수문자를 포함해 8~16자"
+                      placeholder="영문, 숫자, 특수문자를 포함한 8~16자"
                       placeholderTextColor={AppColors.gray}
                       value={password}
                       onChangeText={(value) => {
@@ -440,7 +423,7 @@ export default function ForgotPasswordScreen() {
                 </View>
 
                 <View style={styles.inputContainer}>
-                  <Text style={styles.label}>비밀번호 확인</Text>
+                  <Text style={styles.label}>새 비밀번호 확인</Text>
                   <View style={styles.passwordContainer}>
                     <TextInput
                       style={[
@@ -448,7 +431,7 @@ export default function ForgotPasswordScreen() {
                         styles.passwordInput,
                         passwordConfirmError ? styles.inputError : null,
                       ]}
-                      placeholder="비밀번호를 한 번 더 입력하세요"
+                      placeholder="비밀번호를 한 번 더 입력해 주세요"
                       placeholderTextColor={AppColors.gray}
                       value={passwordConfirm}
                       onChangeText={(value) => {
@@ -483,11 +466,11 @@ export default function ForgotPasswordScreen() {
                     styles.button,
                     isPasswordValid && !isLoading ? styles.buttonActive : null,
                   ]}
-                  onPress={handleResetPassword}
                   disabled={!isPasswordValid || isLoading}
+                  onPress={handleResetPassword}
                 >
                   <Text style={styles.buttonText}>
-                    {isLoading ? "재설정 중..." : "로그인하러 가기"}
+                    {isLoading ? "변경 중..." : "완료"}
                   </Text>
                 </TouchableOpacity>
               </View>
@@ -511,8 +494,8 @@ const styles = StyleSheet.create({
   backButton: {
     position: "absolute",
     top: 30,
-    left: 30,
-    zIndex: 15,
+    left: 20,
+    zIndex: 10,
     padding: 15,
   },
   backIconImage: {
@@ -522,73 +505,64 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
-    paddingTop: 80,
+    paddingHorizontal: 32,
+    paddingTop: 110,
   },
   header: {
-    marginBottom: 40,
-    paddingHorizontal: 30,
+    marginBottom: 28,
   },
   titleGreen: {
-    fontSize: 22,
-    fontWeight: "600",
     color: AppColors.primaryGreen,
-    marginTop: 20,
-    marginBottom: 12,
+    fontSize: 26,
+    fontWeight: "700",
+    marginBottom: 10,
   },
   subtitle: {
-    fontSize: 15,
     color: AppColors.white,
+    fontSize: 14,
     lineHeight: 22,
   },
   formArea: {
-    flex: 1,
-    paddingHorizontal: 30,
+    marginTop: 12,
   },
   inputContainer: {
-    marginBottom: 24,
+    marginBottom: 18,
   },
   label: {
-    fontSize: 15,
     color: AppColors.white,
-    marginBottom: 15,
-    fontWeight: "500",
+    fontSize: 14,
+    marginBottom: 8,
+    fontWeight: "600",
   },
   input: {
-    width: "100%",
     height: 50,
-    backgroundColor: "transparent",
     borderWidth: 1,
     borderColor: AppColors.gray,
     borderRadius: 8,
     paddingHorizontal: 16,
-    fontSize: 15,
     color: AppColors.white,
+    fontSize: 14,
   },
   inputError: {
-    borderColor: AppColors.error,
+    borderColor: "#FF6B6B",
   },
   errorText: {
+    color: "#FF6B6B",
     fontSize: 12,
-    color: AppColors.error,
-    marginTop: 6,
+    marginTop: 8,
+    lineHeight: 18,
   },
   errorTextCentered: {
+    color: "#FF6B6B",
     fontSize: 12,
-    color: AppColors.error,
+    marginTop: 14,
     textAlign: "center",
-    marginTop: 12,
-  },
-  successText: {
-    fontSize: 12,
-    color: AppColors.primaryGreen,
-    textAlign: "center",
-    marginTop: 8,
+    lineHeight: 18,
   },
   button: {
-    width: "100%",
     height: 52,
-    backgroundColor: AppColors.gray,
     borderRadius: 8,
+    backgroundColor: AppColors.gray,
     justifyContent: "center",
     alignItems: "center",
   },
@@ -596,77 +570,78 @@ const styles = StyleSheet.create({
     backgroundColor: AppColors.primaryGreen,
   },
   buttonText: {
-    fontSize: 16,
-    fontWeight: "600",
     color: AppColors.white,
+    fontSize: 16,
+    fontWeight: "700",
   },
   codeArea: {
-    paddingHorizontal: 30,
+    marginTop: 8,
     alignItems: "center",
   },
   timer: {
-    alignSelf: "flex-end",
-    fontSize: 16,
     color: AppColors.white,
-    fontWeight: "600",
-    marginBottom: 20,
+    fontSize: 18,
+    fontWeight: "700",
+    marginBottom: 18,
   },
   codeContainer: {
     flexDirection: "row",
-    justifyContent: "center",
-    gap: 8,
-    marginBottom: 20,
+    justifyContent: "space-between",
+    gap: 10,
   },
   codeBox: {
-    width: 49,
+    width: 46,
     height: 56,
+    borderRadius: 10,
     borderWidth: 1,
-    borderColor: AppColors.white,
-    borderRadius: 8,
+    borderColor: AppColors.gray,
     justifyContent: "center",
     alignItems: "center",
   },
   codeBoxError: {
-    borderColor: AppColors.error,
+    borderColor: "#FF6B6B",
   },
   codeText: {
-    fontSize: 30,
     color: AppColors.white,
-    fontWeight: "600",
-    textAlign: "center",
-    lineHeight: 34,
+    fontSize: 24,
+    fontWeight: "700",
   },
   hiddenInput: {
     position: "absolute",
     opacity: 0,
-    height: 0,
+    width: 1,
+    height: 1,
   },
-  bottomButtons: {
+  resendMessage: {
+    color: AppColors.primaryGreen,
+    fontSize: 12,
+    marginTop: 10,
+  },
+  codeButtonRow: {
+    width: "100%",
     flexDirection: "row",
-    paddingHorizontal: 30,
-    paddingBottom: 30,
-    gap: 12,
+    gap: 10,
+    marginTop: 22,
   },
-  resendButton: {
+  secondaryActionButton: {
     flex: 1,
     height: 52,
-    backgroundColor: AppColors.gray,
     borderRadius: 8,
+    borderWidth: 1,
+    borderColor: AppColors.white,
     justifyContent: "center",
     alignItems: "center",
   },
-  resendButtonText: {
-    fontSize: 16,
-    fontWeight: "600",
+  secondaryActionButtonDisabled: {
+    opacity: 0.5,
+  },
+  secondaryActionText: {
     color: AppColors.white,
+    fontSize: 15,
+    fontWeight: "600",
   },
-  completeButton: {
+  codeConfirmButton: {
     flex: 1,
-    height: 52,
-    backgroundColor: AppColors.gray,
-    borderRadius: 8,
-    justifyContent: "center",
-    alignItems: "center",
   },
   passwordContainer: {
     position: "relative",
@@ -676,13 +651,13 @@ const styles = StyleSheet.create({
   },
   eyeIcon: {
     position: "absolute",
-    right: 16,
-    top: 13,
+    right: 12,
+    top: 10,
     padding: 4,
   },
   eyeIconImage: {
-    width: 24,
-    height: 24,
+    width: 22,
+    height: 22,
     tintColor: AppColors.gray,
   },
 });

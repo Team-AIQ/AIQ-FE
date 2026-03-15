@@ -6,6 +6,52 @@ type RequestOptions = Omit<RequestInit, "headers" | "body"> & {
   requireAuth?: boolean;
 };
 
+export class ApiError extends Error {
+  status: number;
+  payload?: unknown;
+
+  constructor(message: string, status: number, payload?: unknown) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.payload = payload;
+  }
+}
+
+export function isApiError(error: unknown): error is ApiError {
+  return error instanceof ApiError;
+}
+
+function tryParseJson(text: string) {
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return undefined;
+  }
+}
+
+function getErrorMessage(status: number, payload: unknown, fallback: string) {
+  if (payload && typeof payload === "object") {
+    const record = payload as Record<string, unknown>;
+    const message =
+      record.message ??
+      record.error ??
+      record.detail ??
+      record.title;
+
+    if (typeof message === "string" && message.trim()) {
+      return message;
+    }
+  }
+
+  if (status === 401) return "로그인이 필요합니다.";
+  if (status === 403) return "이 요청을 처리할 권한이 없습니다.";
+  if (status === 404) return "요청한 리소스를 찾을 수 없습니다.";
+  if (status >= 500) return "서버 오류가 발생했습니다.";
+
+  return fallback;
+}
+
 export async function apiRequest<T>(
   url: string,
   options: RequestOptions = {},
@@ -20,7 +66,7 @@ export async function apiRequest<T>(
   if (requireAuth) {
     const accessToken = await getAccessToken();
     if (!accessToken) {
-      throw new Error("로그인이 필요합니다.");
+      throw new ApiError("로그인이 필요합니다.", 401);
     }
 
     requestHeaders.Authorization = `Bearer ${accessToken}`;
@@ -32,15 +78,24 @@ export async function apiRequest<T>(
     body: body === undefined ? undefined : JSON.stringify(body),
   });
 
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(text || `Request failed with status ${response.status}`);
-  }
-
   if (response.status === 204) {
     return undefined as T;
   }
 
   const text = await response.text();
-  return (text ? JSON.parse(text) : undefined) as T;
+  const payload = text ? tryParseJson(text) : undefined;
+
+  if (!response.ok) {
+    throw new ApiError(
+      getErrorMessage(response.status, payload, `Request failed with status ${response.status}`),
+      response.status,
+      payload ?? text,
+    );
+  }
+
+  if (!text) {
+    return undefined as T;
+  }
+
+  return ((payload ?? text) as T);
 }

@@ -1,7 +1,7 @@
 import { API_ENDPOINTS } from "@/constants/api";
 import { AppColors } from "@/constants/theme";
 import { clearAuthTokens } from "@/lib/auth-storage";
-import { apiRequest } from "@/lib/api-client";
+import { apiRequest, isApiError } from "@/lib/api-client";
 import { clearSessionData, getUserProfile, saveUserProfile } from "@/lib/user-session";
 import { useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
@@ -23,6 +23,8 @@ export default function ProfileScreen() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [passwordConfirm, setPasswordConfirm] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+  const [isWithdrawing, setIsWithdrawing] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -49,6 +51,8 @@ export default function ProfileScreen() {
       return;
     }
 
+    setIsSaving(true);
+
     try {
       await apiRequest(API_ENDPOINTS.PROFILE_UPDATE, {
         method: "PATCH",
@@ -59,18 +63,24 @@ export default function ProfileScreen() {
           password: password || undefined,
         },
       });
+
+      await saveUserProfile({
+        nickname: nickname.trim(),
+        email: email.trim(),
+      });
+
+      Alert.alert("저장 완료", "프로필 정보가 저장되었습니다.", [
+        { text: "확인", onPress: () => router.back() },
+      ]);
     } catch (error) {
-      console.log("Profile update fallback:", error);
+      if (isApiError(error)) {
+        Alert.alert("저장 실패", error.message);
+      } else {
+        Alert.alert("저장 실패", "프로필 정보를 저장할 수 없습니다.");
+      }
+    } finally {
+      setIsSaving(false);
     }
-
-    await saveUserProfile({
-      nickname: nickname.trim(),
-      email: email.trim(),
-    });
-
-    Alert.alert("저장 완료", "프로필 정보가 저장되었습니다.", [
-      { text: "확인", onPress: () => router.back() },
-    ]);
   };
 
   const handleLogout = async () => {
@@ -78,24 +88,32 @@ export default function ProfileScreen() {
     router.replace("/(auth)/welcome");
   };
 
-  const handleWithdraw = () => {
-    Alert.alert("회원탈퇴", "계정 정보와 크레딧을 초기화하고 로그인 화면으로 이동할까요?", [
+  const confirmWithdraw = () => {
+    Alert.alert("회원탈퇴", "탈퇴하면 계정과 저장된 정보가 초기화됩니다. 계속할까요?", [
       { text: "취소", style: "cancel" },
       {
         text: "계속",
         style: "destructive",
         onPress: async () => {
+          setIsWithdrawing(true);
+
           try {
             await apiRequest(API_ENDPOINTS.ACCOUNT_WITHDRAW, {
               method: "DELETE",
               requireAuth: true,
             });
-          } catch (error) {
-            console.log("Withdraw fallback:", error);
-          }
 
-          await Promise.all([clearAuthTokens(), clearSessionData()]);
-          router.replace("/(auth)/welcome");
+            await Promise.all([clearAuthTokens(), clearSessionData()]);
+            router.replace("/(auth)/welcome");
+          } catch (error) {
+            if (isApiError(error)) {
+              Alert.alert("회원탈퇴 실패", error.message);
+            } else {
+              Alert.alert("회원탈퇴 실패", "회원탈퇴를 진행할 수 없습니다.");
+            }
+          } finally {
+            setIsWithdrawing(false);
+          }
         },
       },
     ]);
@@ -172,20 +190,36 @@ export default function ProfileScreen() {
               placeholderTextColor={AppColors.gray}
             />
             <Text style={styles.helperText}>
-              현재 비밀번호 변경은 로컬 프로필 관리용으로만 우선 적용됩니다.
+              비밀번호 변경은 서버 스펙이 확정되면 더 정확히 연동할 수 있어요.
             </Text>
           </View>
 
-          <TouchableOpacity style={styles.primaryButton} onPress={handleSave}>
-            <Text style={styles.primaryButtonText}>저장</Text>
+          <TouchableOpacity
+            style={[styles.primaryButton, isSaving && styles.disabledButton]}
+            onPress={handleSave}
+            disabled={isSaving || isWithdrawing}
+          >
+            <Text style={styles.primaryButtonText}>
+              {isSaving ? "저장 중..." : "저장"}
+            </Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.secondaryButton} onPress={handleLogout}>
+          <TouchableOpacity
+            style={styles.secondaryButton}
+            onPress={handleLogout}
+            disabled={isSaving || isWithdrawing}
+          >
             <Text style={styles.secondaryButtonText}>로그아웃</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.withdrawButton} onPress={handleWithdraw}>
-            <Text style={styles.withdrawButtonText}>회원탈퇴</Text>
+          <TouchableOpacity
+            style={[styles.withdrawButton, isWithdrawing && styles.disabledButton]}
+            onPress={confirmWithdraw}
+            disabled={isSaving || isWithdrawing}
+          >
+            <Text style={styles.withdrawButtonText}>
+              {isWithdrawing ? "탈퇴 처리 중..." : "회원탈퇴"}
+            </Text>
           </TouchableOpacity>
         </ScrollView>
       </View>
@@ -310,5 +344,8 @@ const styles = StyleSheet.create({
     color: "#F07C7C",
     fontSize: 15,
     fontWeight: "600",
+  },
+  disabledButton: {
+    opacity: 0.6,
   },
 });

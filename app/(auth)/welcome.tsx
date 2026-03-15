@@ -10,7 +10,6 @@ import {
   Alert,
   Dimensions,
   Image,
-  Pressable,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -18,7 +17,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-const { width } = Dimensions.get("window");
+const { width, height } = Dimensions.get("window");
 
 const OAUTH_URLS = {
   kakao: `${API_BASE_URL}/oauth2/authorization/kakao?origin=app`,
@@ -45,8 +44,7 @@ export default function WelcomeScreen() {
       if (result.type !== "success") {
         Alert.alert("로그인 취소", "소셜 로그인이 취소되었습니다.");
       }
-    } catch (error) {
-      console.error("OAuth Error:", error);
+    } catch {
       Alert.alert("로그인 오류", "로그인 중 문제가 발생했습니다.");
     }
   };
@@ -56,71 +54,82 @@ export default function WelcomeScreen() {
       <StatusBar style="light" />
 
       <View style={styles.container}>
-        <View style={styles.logoArea}>
-          <Image
-            source={require("../../assets/images/auth-logo.png")}
-            style={styles.logo}
-            resizeMode="contain"
-          />
-        </View>
-
-        <View style={styles.buttonArea}>
-          <TouchableOpacity
-            style={[styles.button, styles.kakao]}
-            onPress={() => handleOAuthLogin("kakao")}
-          >
+        <View style={styles.content}>
+          <View style={styles.logoArea}>
             <Image
-              source={require("../../assets/images/kakao.png")}
-              style={styles.kakaoIcon}
+              source={require("../../assets/images/auth-logo.png")}
+              style={styles.logo}
               resizeMode="contain"
             />
-            <Text style={styles.kakaoText}>카카오로 계속하기</Text>
-          </TouchableOpacity>
+          </View>
 
-          <TouchableOpacity
-            style={[styles.button, styles.google]}
-            onPress={() => handleOAuthLogin("google")}
-          >
-            <Image
-              source={require("../../assets/images/Google Logo.png")}
-              style={styles.oauthIcon}
-            />
-            <Text style={styles.googleText}>Google로 계속하기</Text>
-          </TouchableOpacity>
+          <View style={styles.buttonArea}>
+            <TouchableOpacity
+              style={[styles.button, styles.kakao]}
+              onPress={() => handleOAuthLogin("kakao")}
+              activeOpacity={0.88}
+            >
+              <Image
+                source={require("../../assets/images/kakao.png")}
+                style={styles.kakaoIcon}
+                resizeMode="contain"
+              />
+              <Text style={styles.kakaoText}>카카오로 계속하기</Text>
+            </TouchableOpacity>
 
-          <TouchableOpacity
-            style={[styles.button, styles.naver]}
-            onPress={() => handleOAuthLogin("naver")}
-          >
-            <Image
-              source={require("../../assets/images/naver logo.png")}
-              style={styles.oauthIcon}
-            />
-            <Text style={styles.naverText}>네이버로 계속하기</Text>
-          </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.button, styles.google]}
+              onPress={() => handleOAuthLogin("google")}
+              activeOpacity={0.88}
+            >
+              <Image
+                source={require("../../assets/images/Google Logo.png")}
+                style={styles.oauthIcon}
+              />
+              <Text style={styles.googleText}>Google로 계속하기</Text>
+            </TouchableOpacity>
 
-          <Text style={styles.terms}>
-            <Text style={styles.termsGray}>
-              회원가입 없이 이용 가능하며 로그인 시{" "}
+            <TouchableOpacity
+              style={[styles.button, styles.naver]}
+              onPress={() => handleOAuthLogin("naver")}
+              activeOpacity={0.88}
+            >
+              <Image
+                source={require("../../assets/images/naver logo.png")}
+                style={styles.oauthIcon}
+              />
+              <Text style={styles.naverText}>네이버로 계속하기</Text>
+            </TouchableOpacity>
+
+            <Text style={styles.terms}>
+              <Text style={styles.termsText}>
+                회원가입 없이 이용 가능하며 로그인 시{" "}
+              </Text>
+              <Text
+                style={styles.termsLink}
+                onPress={() => setLegalType("terms")}
+              >
+                이용약관
+              </Text>
+              <Text style={styles.termsText}> 및{"\n"}</Text>
+              <Text
+                style={styles.termsLink}
+                onPress={() => setLegalType("privacy")}
+              >
+                개인정보처리방침
+              </Text>
+              <Text style={styles.termsText}>에 동의한 것으로 간주됩니다.</Text>
             </Text>
-            <Pressable onPress={() => setLegalType("terms")}>
-              <Text style={styles.termsGreen}>이용약관</Text>
-            </Pressable>
-            <Text style={styles.termsGray}> 및 </Text>
-            <Pressable onPress={() => setLegalType("privacy")}>
-              <Text style={styles.termsGreen}>개인정보처리방침</Text>
-            </Pressable>
-            <Text style={styles.termsGray}>에 동의한 것으로 간주됩니다.</Text>
-          </Text>
 
-          <View style={styles.emailLinks}>
-            <TouchableOpacity onPress={() => router.push("/(auth)/login")}>
-              <Text style={styles.emailLink}>이메일로 로그인</Text>
-            </TouchableOpacity>
-            <Text style={styles.emailDivider}>|</Text>
-            <TouchableOpacity onPress={() => router.push("/(auth)/signup")}>
-              <Text style={styles.emailLink}>이메일로 가입</Text>
-            </TouchableOpacity>
+            <View style={styles.emailLinks}>
+              <TouchableOpacity onPress={() => router.push("/(auth)/login")}>
+                <Text style={styles.emailLink}>이메일로 로그인</Text>
+              </TouchableOpacity>
+              <Text style={styles.emailDivider}>|</Text>
+              <TouchableOpacity onPress={() => router.push("/(auth)/signup")}>
+                <Text style={styles.emailLink}>이메일로 가입</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </View>
@@ -149,19 +158,23 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: AppColors.black,
-    justifyContent: "space-between",
-    paddingVertical: 40,
+  },
+  content: {
+    flex: 1,
+    justifyContent: "center",
+    paddingBottom: 6,
   },
   logoArea: {
     alignItems: "center",
-    marginTop: 80,
+    marginTop: 20,
   },
   logo: {
-    width: width * 3,
-    height: width * 0.9,
+    width: width * 0.54,
+    height: Math.min(height * 0.22, 220),
   },
   buttonArea: {
     paddingHorizontal: 43,
+    marginTop: 48,
   },
   button: {
     flexDirection: "row",
@@ -181,31 +194,54 @@ const styles = StyleSheet.create({
     height: 19,
     marginRight: 8,
   },
-  kakao: { backgroundColor: "#FEE500" },
-  kakaoText: { color: "#000", fontWeight: "600" },
-  google: { backgroundColor: "#FFF" },
-  googleText: { color: "#000", fontWeight: "600" },
-  naver: { backgroundColor: AppColors.primaryGreen },
-  naverText: { color: "#FFF", fontWeight: "600" },
+  kakao: {
+    backgroundColor: "#FEE500",
+  },
+  kakaoText: {
+    color: "#000",
+    fontWeight: "600",
+    fontSize: 15,
+  },
+  google: {
+    backgroundColor: "#FFF",
+  },
+  googleText: {
+    color: "#000",
+    fontWeight: "600",
+    fontSize: 15,
+  },
+  naver: {
+    backgroundColor: "#45D38E",
+  },
+  naverText: {
+    color: "#FFF",
+    fontWeight: "600",
+    fontSize: 15,
+  },
   terms: {
-    fontSize: 11,
     textAlign: "center",
-    marginTop: 10,
+    marginTop: 4,
     lineHeight: 18,
+    paddingHorizontal: 14,
   },
-  termsGray: {
-    color: "#CACACA",
+  termsText: {
+    color: "#D7D7D7",
+    fontSize: 11,
+    lineHeight: 18,
+    fontWeight: "400",
   },
-  termsGreen: {
+  termsLink: {
     color: AppColors.primaryGreen,
     textDecorationLine: "underline",
+    fontSize: 11,
+    lineHeight: 18,
+    fontWeight: "400",
   },
   emailLinks: {
     flexDirection: "row",
     justifyContent: "center",
     alignItems: "center",
-    marginTop: 60,
-    marginBottom: 5,
+    marginTop: 24,
   },
   emailLink: {
     color: "#FFF",
@@ -215,6 +251,6 @@ const styles = StyleSheet.create({
   emailDivider: {
     color: "#FFF",
     fontSize: 13,
-    marginHorizontal: 8,
+    marginHorizontal: 10,
   },
 });

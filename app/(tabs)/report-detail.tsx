@@ -37,8 +37,8 @@ export default function ReportDetailScreen() {
       if (supported) {
         await Linking.openURL(url);
       }
-    } catch (error) {
-      console.error("링크 열기 실패:", error);
+    } catch {
+      // Ignore link open failures silently for now; the user remains on the report.
     }
   };
 

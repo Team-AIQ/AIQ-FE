@@ -21,8 +21,7 @@ export default function OAuthCallbackScreen() {
 
         await saveAuthTokens(accessToken, refreshToken);
         router.replace("/(auth)/onboarding");
-      } catch (error) {
-        console.error("OAuth callback error:", error);
+      } catch {
         Alert.alert("로그인 오류", "로그인 처리 중 문제가 발생했습니다.");
         router.replace("/(auth)/login");
       }
