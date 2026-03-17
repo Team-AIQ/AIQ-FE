@@ -18,6 +18,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 const { width, height } = Dimensions.get("window");
+const IS_SMALL = height < 740;
 
 const OAUTH_URLS = {
   kakao: `${API_BASE_URL}/oauth2/authorization/kakao?origin=app`,
@@ -74,7 +75,9 @@ export default function WelcomeScreen() {
                 style={styles.kakaoIcon}
                 resizeMode="contain"
               />
-              <Text style={styles.kakaoText}>카카오로 계속하기</Text>
+              <Text allowFontScaling={false} style={styles.kakaoText}>
+                카카오로 계속하기
+              </Text>
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -86,7 +89,9 @@ export default function WelcomeScreen() {
                 source={require("../../assets/images/Google Logo.png")}
                 style={styles.oauthIcon}
               />
-              <Text style={styles.googleText}>Google로 계속하기</Text>
+              <Text allowFontScaling={false} style={styles.googleText}>
+                Google로 계속하기
+              </Text>
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -98,17 +103,16 @@ export default function WelcomeScreen() {
                 source={require("../../assets/images/naver logo.png")}
                 style={styles.oauthIcon}
               />
-              <Text style={styles.naverText}>네이버로 계속하기</Text>
+              <Text allowFontScaling={false} style={styles.naverText}>
+                네이버로 계속하기
+              </Text>
             </TouchableOpacity>
 
-            <Text style={styles.terms}>
+            <Text allowFontScaling={false} style={styles.terms}>
               <Text style={styles.termsText}>
                 회원가입 없이 이용 가능하며 로그인 시{" "}
               </Text>
-              <Text
-                style={styles.termsLink}
-                onPress={() => setLegalType("terms")}
-              >
+              <Text style={styles.termsLink} onPress={() => setLegalType("terms")}>
                 이용약관
               </Text>
               <Text style={styles.termsText}> 및{"\n"}</Text>
@@ -123,11 +127,17 @@ export default function WelcomeScreen() {
 
             <View style={styles.emailLinks}>
               <TouchableOpacity onPress={() => router.push("/(auth)/login")}>
-                <Text style={styles.emailLink}>이메일로 로그인</Text>
+                <Text allowFontScaling={false} style={styles.emailLink}>
+                  이메일로 로그인
+                </Text>
               </TouchableOpacity>
-              <Text style={styles.emailDivider}>|</Text>
+              <Text allowFontScaling={false} style={styles.emailDivider}>
+                |
+              </Text>
               <TouchableOpacity onPress={() => router.push("/(auth)/signup")}>
-                <Text style={styles.emailLink}>이메일로 가입</Text>
+                <Text allowFontScaling={false} style={styles.emailLink}>
+                  이메일로 가입
+                </Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -221,19 +231,19 @@ const styles = StyleSheet.create({
   terms: {
     textAlign: "center",
     marginTop: 4,
-    lineHeight: 18,
     paddingHorizontal: 14,
+    lineHeight: 18,
   },
   termsText: {
     color: "#D7D7D7",
-    fontSize: 11,
+    fontSize: IS_SMALL ? 10 : 11,
     lineHeight: 18,
     fontWeight: "400",
   },
   termsLink: {
     color: AppColors.primaryGreen,
     textDecorationLine: "underline",
-    fontSize: 11,
+    fontSize: IS_SMALL ? 10 : 11,
     lineHeight: 18,
     fontWeight: "400",
   },
@@ -245,12 +255,12 @@ const styles = StyleSheet.create({
   },
   emailLink: {
     color: "#FFF",
-    fontSize: 13,
+    fontSize: IS_SMALL ? 12 : 13,
     textDecorationLine: "underline",
   },
   emailDivider: {
     color: "#FFF",
-    fontSize: 13,
+    fontSize: IS_SMALL ? 12 : 13,
     marginHorizontal: 10,
   },
 });

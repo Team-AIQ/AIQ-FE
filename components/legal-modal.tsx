@@ -1,5 +1,6 @@
 import { AppColors } from "@/constants/theme";
 import {
+  Dimensions,
   Modal,
   Pressable,
   ScrollView,
@@ -15,48 +16,57 @@ type LegalModalProps = {
   onClose: () => void;
 };
 
-function renderParagraphs(description: string) {
+const { height } = Dimensions.get("window");
+const IS_SMALL = height < 740;
+
+function isSectionHeader(line: string) {
+  return /^\d+\./.test(line) || /^제\d+조/.test(line);
+}
+
+function renderDescription(description: string) {
   return description
     .trim()
     .split("\n\n")
     .map((block, index) => {
       const lines = block.split("\n").filter(Boolean);
       const [firstLine, ...restLines] = lines;
-      const isSectionTitle =
-        /^\d+\./.test(firstLine) || /^제\d+조/.test(firstLine);
+      const section = isSectionHeader(firstLine);
 
-      if (isSectionTitle) {
-        return (
-          <View key={`${firstLine}-${index}`} style={styles.section}>
-            <Text style={styles.sectionTitle}>{firstLine}</Text>
-            {restLines.map((line, lineIndex) => {
-              const isBullet = line.trim().startsWith("- ");
+      return (
+        <View key={`${firstLine}-${index}`} style={styles.section}>
+          {section ? (
+            <>
+              <Text allowFontScaling={false} style={styles.sectionTitle}>
+                {firstLine}
+              </Text>
+              <View style={styles.divider} />
+              {restLines.map((line, lineIndex) => {
+                const bullet = line.trim().startsWith("- ");
+                return (
+                  <Text
+                    key={`${line}-${lineIndex}`}
+                    allowFontScaling={false}
+                    style={bullet ? styles.bullet : styles.paragraph}
+                  >
+                    {line}
+                  </Text>
+                );
+              })}
+            </>
+          ) : (
+            lines.map((line, lineIndex) => {
+              const bullet = line.trim().startsWith("- ");
               return (
                 <Text
                   key={`${line}-${lineIndex}`}
-                  style={isBullet ? styles.bullet : styles.paragraph}
+                  allowFontScaling={false}
+                  style={bullet ? styles.bullet : styles.paragraph}
                 >
                   {line}
                 </Text>
               );
-            })}
-          </View>
-        );
-      }
-
-      return (
-        <View key={`${firstLine}-${index}`} style={styles.section}>
-          {lines.map((line, lineIndex) => {
-            const isBullet = line.trim().startsWith("- ");
-            return (
-              <Text
-                key={`${line}-${lineIndex}`}
-                style={isBullet ? styles.bullet : styles.paragraph}
-              >
-                {line}
-              </Text>
-            );
-          })}
+            })
+          )}
         </View>
       );
     });
@@ -65,8 +75,8 @@ function renderParagraphs(description: string) {
 export function LegalModal({
   description,
   open,
-  onClose,
   title,
+  onClose,
 }: LegalModalProps) {
   return (
     <Modal
@@ -79,9 +89,13 @@ export function LegalModal({
         <Pressable style={styles.backdrop} onPress={onClose} />
         <View style={styles.card}>
           <View style={styles.header}>
-            <Text style={styles.title}>{title}</Text>
+            <Text allowFontScaling={false} style={styles.title}>
+              {title}
+            </Text>
             <Pressable style={styles.closeButton} onPress={onClose}>
-              <Text style={styles.closeText}>닫기</Text>
+              <Text allowFontScaling={false} style={styles.closeText}>
+                X
+              </Text>
             </Pressable>
           </View>
 
@@ -90,7 +104,7 @@ export function LegalModal({
             contentContainerStyle={styles.content}
             showsVerticalScrollIndicator
           >
-            {renderParagraphs(description)}
+            {renderDescription(description)}
           </ScrollView>
         </View>
       </View>
@@ -135,18 +149,25 @@ const styles = StyleSheet.create({
   title: {
     flex: 1,
     color: AppColors.primaryGreen,
-    fontSize: 20,
+    fontSize: IS_SMALL ? 18 : 20,
     fontWeight: "800",
     paddingRight: 12,
   },
   closeButton: {
-    minWidth: 52,
-    alignItems: "flex-end",
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "rgba(63, 221, 144, 0.55)",
+    backgroundColor: "rgba(6, 10, 9, 0.6)",
+    alignItems: "center",
+    justifyContent: "center",
   },
   closeText: {
     color: AppColors.primaryGreen,
-    fontSize: 15,
-    fontWeight: "700",
+    fontSize: 16,
+    fontWeight: "900",
+    lineHeight: 18,
   },
   scroll: {
     flexGrow: 0,
@@ -155,26 +176,31 @@ const styles = StyleSheet.create({
     paddingBottom: 10,
   },
   section: {
-    marginBottom: 22,
+    marginBottom: 20,
+  },
+  divider: {
+    height: 1,
+    backgroundColor: "rgba(63, 221, 144, 0.22)",
+    marginBottom: 12,
   },
   sectionTitle: {
     color: AppColors.white,
-    fontSize: 17,
+    fontSize: IS_SMALL ? 16 : 17,
     fontWeight: "700",
     lineHeight: 24,
     marginBottom: 10,
   },
   paragraph: {
     color: AppColors.white,
-    fontSize: 14,
-    lineHeight: 24,
+    fontSize: IS_SMALL ? 13 : 14,
+    lineHeight: IS_SMALL ? 22 : 24,
     letterSpacing: -0.2,
     marginBottom: 8,
   },
   bullet: {
     color: "#D8D8D8",
-    fontSize: 14,
-    lineHeight: 24,
+    fontSize: IS_SMALL ? 13 : 14,
+    lineHeight: IS_SMALL ? 22 : 24,
     letterSpacing: -0.2,
     paddingLeft: 6,
     marginBottom: 6,
