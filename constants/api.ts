@@ -14,6 +14,7 @@ export const API_ENDPOINTS = {
   PASSWORD_CODE_REQUEST: `${API_BASE_URL}/api/auth/password/code-request`,
   PASSWORD_VERIFY: `${API_BASE_URL}/api/auth/password/verify`,
   PASSWORD_RESET: `${API_BASE_URL}/api/auth/password/reset`,
+  PASSWORD_CHANGE: `${API_BASE_URL}/api/auth/password/change`,
 
   CURATION_START: `${API_BASE_URL}/api/v1/curation/start`,
   CURATION_ANSWER: `${API_BASE_URL}/api/v1/curation/answer`,

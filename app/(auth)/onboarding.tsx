@@ -15,6 +15,7 @@ import { AppColors } from "@/constants/theme";
 import MatrixBackground from "@/components/MatrixBackground";
 
 const { width, height } = Dimensions.get("window");
+const IS_SMALL = height < 740;
 
 type Message = {
   id: string;
@@ -54,7 +55,7 @@ export default function OnboardingScreen() {
   useEffect(() => {
     pushAiMessagesSequentially([
       "만나서 반가워 지구인!",
-      "나는 AIQ 행성에서 온 Pickle(피클)이라고 해.🛸",
+      "나는 AIQ 행성에서 온 Pickle(피클)이야. 🛸",
       "지구에는 없는 '워프쇼핑'을 알려주려고 멀리서 날아왔어.",
       "지구인의 '시간'이라는 귀한 자원을 아껴줄 AIQ 방식을 소개해 줄게!",
     ], 1);
@@ -178,7 +179,7 @@ export default function OnboardingScreen() {
         {/* 하단 버튼 영역 */}
         <View style={styles.buttonArea}>
           {step === 1 && (
-            <View style={styles.buttonRow}>
+            <View style={[styles.buttonRow, IS_SMALL ? styles.buttonRowStack : null]}>
               <TouchableOpacity
                 style={[styles.button, styles.primaryButton, isTyping && styles.buttonDisabled]}
                 onPress={() => handleUserSelect("워프쇼핑이 뭐야?")}
@@ -357,8 +358,8 @@ const styles = StyleSheet.create({
   aiMessageText: {
     color: AppColors.white,
     fontFamily: "Galmuri9",
-    fontSize: 12,
-    lineHeight: 18,
+    fontSize: IS_SMALL ? 11 : 12,
+    lineHeight: IS_SMALL ? 18 : 20,
   },
   userMessageContainer: {
     marginBottom: 12,
@@ -380,9 +381,9 @@ const styles = StyleSheet.create({
   },
   userMessageText: {
     color: AppColors.black,
-    fontSize: 13,
+    fontSize: IS_SMALL ? 12 : 13,
     fontWeight: "600",
-    lineHeight: 18,
+    lineHeight: IS_SMALL ? 18 : 20,
   },
   buttonArea: {
     paddingHorizontal: 20,
@@ -394,13 +395,18 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 12,
   },
+  buttonRowStack: {
+    flexDirection: "column",
+  },
   button: {
-    height: 52,
+    minHeight: 56,
     borderRadius: 28,
     justifyContent: "center",
     alignItems: "center",
     borderWidth: 1,
     borderColor: AppColors.primaryGreen,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
     // 네온 효과 강화
     shadowColor: AppColors.primaryGreen,
     shadowOffset: { width: 0, height: 0 },
@@ -414,8 +420,10 @@ const styles = StyleSheet.create({
   },
   primaryButtonText: {
     color: AppColors.black,
-    fontSize: 13,
+    fontSize: IS_SMALL ? 11 : 13,
     fontWeight: "700",
+    lineHeight: IS_SMALL ? 18 : 20,
+    textAlign: "center",
   },
   secondaryButton: {
     flex: 1,
@@ -423,8 +431,10 @@ const styles = StyleSheet.create({
   },
   secondaryButtonText: {
     color: AppColors.black,
-    fontSize: 13,
+    fontSize: IS_SMALL ? 11 : 13,
     fontWeight: "700",
+    lineHeight: IS_SMALL ? 18 : 20,
+    textAlign: "center",
   },
   fullButton: {
     width: "100%",
@@ -432,8 +442,10 @@ const styles = StyleSheet.create({
   },
   fullButtonText: {
     color: AppColors.black,
-    fontSize: 13,
+    fontSize: IS_SMALL ? 11 : 13,
     fontWeight: "600",
+    lineHeight: IS_SMALL ? 18 : 20,
+    textAlign: "center",
   },
   buttonDisabled: {
     opacity: 0.5,

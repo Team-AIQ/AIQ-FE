@@ -1,14 +1,14 @@
 import { API_ENDPOINTS } from "@/constants/api";
+import { KeyboardAwareScreen } from "@/components/keyboard-aware-screen";
 import { AppColors } from "@/constants/theme";
 import { clearAuthTokens } from "@/lib/auth-storage";
 import { apiRequest, isApiError } from "@/lib/api-client";
-import { clearSessionData, getUserProfile, saveUserProfile } from "@/lib/user-session";
+import { clearSessionData, getUserProfile } from "@/lib/user-session";
 import { useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useEffect, useState } from "react";
 import {
   Alert,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -21,6 +21,7 @@ export default function ProfileScreen() {
   const router = useRouter();
   const [nickname, setNickname] = useState("");
   const [email, setEmail] = useState("");
+  const [currentPassword, setCurrentPassword] = useState("");
   const [password, setPassword] = useState("");
   const [passwordConfirm, setPasswordConfirm] = useState("");
   const [isSaving, setIsSaving] = useState(false);
@@ -41,37 +42,39 @@ export default function ProfileScreen() {
   }, []);
 
   const handleSave = async () => {
-    if (!nickname.trim() || !email.trim()) {
-      Alert.alert("입력 확인", "닉네임과 이메일을 입력해 주세요.");
+    const isChangingPassword = password.length > 0 || passwordConfirm.length > 0;
+
+    if (isChangingPassword && !currentPassword.trim()) {
+      Alert.alert("비밀번호 확인", "현재 비밀번호를 입력해 주세요.");
       return;
     }
 
-    if ((password || passwordConfirm) && password !== passwordConfirm) {
-      Alert.alert("비밀번호 확인", "비밀번호 확인 값이 일치하지 않습니다.");
+    if (isChangingPassword && password !== passwordConfirm) {
+      Alert.alert("비밀번호 확인", "새 비밀번호 확인 값이 일치하지 않습니다.");
       return;
     }
 
     setIsSaving(true);
 
     try {
-      await apiRequest(API_ENDPOINTS.PROFILE_UPDATE, {
-        method: "PATCH",
-        requireAuth: true,
-        body: {
-          nickname: nickname.trim(),
-          email: email.trim(),
-          password: password || undefined,
-        },
-      });
+      if (isChangingPassword) {
+        await apiRequest(API_ENDPOINTS.PASSWORD_CHANGE, {
+          method: "PATCH",
+          requireAuth: true,
+          body: {
+            currentPassword: currentPassword.trim(),
+            newPassword: password.trim(),
+          },
+        });
+      }
 
-      await saveUserProfile({
-        nickname: nickname.trim(),
-        email: email.trim(),
-      });
-
-      Alert.alert("저장 완료", "프로필 정보가 저장되었습니다.", [
-        { text: "확인", onPress: () => router.back() },
-      ]);
+      Alert.alert(
+        "저장 완료",
+        isChangingPassword
+          ? "비밀번호가 변경되었습니다."
+          : "변경할 내용이 없습니다.",
+        [{ text: "확인", onPress: () => router.back() }],
+      );
     } catch (error) {
       if (isApiError(error)) {
         Alert.alert("저장 실패", error.message);
@@ -79,6 +82,9 @@ export default function ProfileScreen() {
         Alert.alert("저장 실패", "프로필 정보를 저장할 수 없습니다.");
       }
     } finally {
+      setCurrentPassword("");
+      setPassword("");
+      setPasswordConfirm("");
       setIsSaving(false);
     }
   };
@@ -132,10 +138,9 @@ export default function ProfileScreen() {
           <View style={styles.placeholder} />
         </View>
 
-        <ScrollView
+        <KeyboardAwareScreen
           style={styles.scrollView}
           contentContainerStyle={styles.content}
-          showsVerticalScrollIndicator={false}
         >
           <View style={styles.avatar}>
             <Text style={styles.avatarText}>
@@ -146,10 +151,11 @@ export default function ProfileScreen() {
           <View style={styles.fieldGroup}>
             <Text style={styles.label}>닉네임</Text>
             <TextInput
-              style={styles.input}
+              style={[styles.input, styles.inputDisabled]}
               value={nickname}
-              onChangeText={setNickname}
-              placeholder="닉네임을 입력해 주세요"
+              editable={false}
+              selectTextOnFocus={false}
+              placeholder="닉네임"
               placeholderTextColor={AppColors.gray}
             />
           </View>
@@ -157,18 +163,33 @@ export default function ProfileScreen() {
           <View style={styles.fieldGroup}>
             <Text style={styles.label}>이메일</Text>
             <TextInput
-              style={styles.input}
+              style={[styles.input, styles.inputDisabled]}
               value={email}
-              onChangeText={setEmail}
               keyboardType="email-address"
               autoCapitalize="none"
-              placeholder="이메일을 입력해 주세요"
+              editable={false}
+              selectTextOnFocus={false}
+              placeholder="이메일"
               placeholderTextColor={AppColors.gray}
             />
           </View>
 
           <View style={styles.fieldGroup}>
-            <Text style={styles.label}>비밀번호 변경</Text>
+            <Text style={styles.label}>현재 비밀번호</Text>
+            <TextInput
+              style={styles.input}
+              value={currentPassword}
+              onChangeText={setCurrentPassword}
+              secureTextEntry
+              placeholder="현재 비밀번호"
+              placeholderTextColor={AppColors.gray}
+              autoCapitalize="none"
+              autoComplete="password"
+            />
+          </View>
+
+          <View style={styles.fieldGroup}>
+            <Text style={styles.label}>새 비밀번호</Text>
             <TextInput
               style={styles.input}
               value={password}
@@ -180,7 +201,7 @@ export default function ProfileScreen() {
           </View>
 
           <View style={styles.fieldGroup}>
-            <Text style={styles.label}>비밀번호 확인</Text>
+            <Text style={styles.label}>새 비밀번호 확인</Text>
             <TextInput
               style={styles.input}
               value={passwordConfirm}
@@ -189,9 +210,6 @@ export default function ProfileScreen() {
               placeholder="새 비밀번호를 한 번 더 입력해 주세요"
               placeholderTextColor={AppColors.gray}
             />
-            <Text style={styles.helperText}>
-              비밀번호 변경은 서버 스펙이 확정되면 더 정확히 연동할 수 있어요.
-            </Text>
           </View>
 
           <TouchableOpacity
@@ -221,7 +239,7 @@ export default function ProfileScreen() {
               {isWithdrawing ? "탈퇴 처리 중..." : "회원탈퇴"}
             </Text>
           </TouchableOpacity>
-        </ScrollView>
+        </KeyboardAwareScreen>
       </View>
     </SafeAreaView>
   );
@@ -298,11 +316,8 @@ const styles = StyleSheet.create({
     fontSize: 14,
     backgroundColor: "#111111",
   },
-  helperText: {
-    color: AppColors.gray,
-    fontSize: 12,
-    marginTop: 8,
-    lineHeight: 18,
+  inputDisabled: {
+    opacity: 0.6,
   },
   primaryButton: {
     height: 52,

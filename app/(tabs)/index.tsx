@@ -715,16 +715,6 @@ export default function HomeScreen() {
               </TouchableOpacity>
             </View>
 
-            {keyboardVisible ? (
-              <TouchableOpacity
-                style={styles.dismissButtonCenter}
-                onPress={dismissKeyboard}
-              >
-                <View style={styles.dismissArrow}>
-                  <Text style={styles.dismissArrowText}>⌄</Text>
-                </View>
-              </TouchableOpacity>
-            ) : null}
           </View>
         </Pressable>
       </KeyboardAvoidingView>
@@ -999,7 +989,7 @@ const styles = StyleSheet.create({
   inputContainer: {
     paddingHorizontal: 16,
     paddingVertical: 8,
-    paddingBottom: Platform.OS === "ios" ? 40 : 24,
+    paddingBottom: Platform.OS === "ios" ? 24 : 12,
   },
   inputWrapper: {
     flexDirection: "row",
@@ -1022,25 +1012,6 @@ const styles = StyleSheet.create({
     color: AppColors.black,
     maxHeight: 50,
     paddingVertical: 8,
-  },
-  dismissButtonCenter: {
-    alignItems: "center",
-    marginTop: 4,
-    marginBottom: 2,
-  },
-  dismissArrow: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: "rgba(255, 255, 255, 0.2)",
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.3)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  dismissArrowText: {
-    fontSize: 14,
-    color: AppColors.white,
   },
   sendButton: {
     justifyContent: "center",

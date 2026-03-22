@@ -1,4 +1,5 @@
 import { AppColors } from "@/constants/theme";
+import { useEffect, useState } from "react";
 import {
   Dimensions,
   Modal,
@@ -14,6 +15,8 @@ type LegalModalProps = {
   open: boolean;
   title: string;
   onClose: () => void;
+  onAgree?: () => void;
+  agreeLabel?: string;
 };
 
 const { height } = Dimensions.get("window");
@@ -77,7 +80,46 @@ export function LegalModal({
   open,
   title,
   onClose,
+  onAgree,
+  agreeLabel = "동의합니다",
 }: LegalModalProps) {
+  const [canAgree, setCanAgree] = useState(false);
+  const [contentHeight, setContentHeight] = useState(0);
+  const [layoutHeight, setLayoutHeight] = useState(0);
+
+  useEffect(() => {
+    if (!open) {
+      setCanAgree(false);
+      setContentHeight(0);
+      setLayoutHeight(0);
+    }
+  }, [open]);
+
+  useEffect(() => {
+    if (contentHeight > 0 && layoutHeight > 0 && contentHeight <= layoutHeight) {
+      setCanAgree(true);
+    }
+  }, [contentHeight, layoutHeight]);
+
+  const handleScroll = (event: {
+    nativeEvent: {
+      layoutMeasurement: { height: number };
+      contentOffset: { y: number };
+      contentSize: { height: number };
+    };
+  }) => {
+    const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
+    if (contentSize.height <= layoutMeasurement.height) {
+      setCanAgree(true);
+      return;
+    }
+
+    const padding = 12;
+    if (contentOffset.y + layoutMeasurement.height >= contentSize.height - padding) {
+      setCanAgree(true);
+    }
+  };
+
   return (
     <Modal
       animationType="fade"
@@ -103,9 +145,28 @@ export function LegalModal({
             style={styles.scroll}
             contentContainerStyle={styles.content}
             showsVerticalScrollIndicator
+            onScroll={handleScroll}
+            onContentSizeChange={(_, height) => setContentHeight(height)}
+            onLayout={(event) => setLayoutHeight(event.nativeEvent.layout.height)}
+            scrollEventThrottle={16}
           >
             {renderDescription(description)}
           </ScrollView>
+
+          {onAgree && canAgree ? (
+            <Pressable
+              style={[
+                styles.agreeButton,
+                canAgree ? styles.agreeButtonActive : styles.agreeButtonDisabled,
+              ]}
+              disabled={!canAgree}
+              onPress={onAgree}
+            >
+              <Text allowFontScaling={false} style={styles.agreeButtonText}>
+                {agreeLabel}
+              </Text>
+            </Pressable>
+          ) : null}
         </View>
       </View>
     </Modal>
@@ -174,6 +235,28 @@ const styles = StyleSheet.create({
   },
   content: {
     paddingBottom: 10,
+  },
+  agreeButton: {
+    height: 46,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "rgba(63, 221, 144, 0.45)",
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 14,
+  },
+  agreeButtonActive: {
+    backgroundColor: "rgba(63, 221, 144, 0.18)",
+    borderColor: AppColors.primaryGreen,
+  },
+  agreeButtonDisabled: {
+    backgroundColor: "rgba(255, 255, 255, 0.04)",
+    borderColor: "rgba(255, 255, 255, 0.12)",
+  },
+  agreeButtonText: {
+    color: AppColors.white,
+    fontSize: IS_SMALL ? 13 : 14,
+    fontWeight: "700",
   },
   section: {
     marginBottom: 20,

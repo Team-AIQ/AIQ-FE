@@ -1,20 +1,21 @@
+﻿import { KeyboardAwareScreen } from "@/components/keyboard-aware-screen";
 import { LegalModal } from "@/components/legal-modal";
 import { API_ENDPOINTS } from "@/constants/api";
 import { PRIVACY_POLICY } from "@/constants/legal";
 import { AppColors } from "@/constants/theme";
 import { apiRequest, isApiError } from "@/lib/api-client";
 import { saveUserProfile } from "@/lib/user-session";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import * as Linking from "expo-linking";
+import Constants from "expo-constants";
 import { StatusBar } from "expo-status-bar";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
   Dimensions,
   Image,
-  KeyboardAvoidingView,
   Platform,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -43,10 +44,11 @@ export default function SignupScreen() {
   const [emailStatus, setEmailStatus] = useState<EmailStatus>("idle");
   const [emailStatusMessage, setEmailStatusMessage] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [isCheckingEmail, setIsCheckingEmail] = useState(false);
   const [legalOpen, setLegalOpen] = useState(false);
+  const searchParams = useLocalSearchParams<{ email?: string; verified?: string }>();
 
   const isValidEmail = /\S+@\S+\.\S+/.test(email);
+  const originParam = Constants.appOwnership === "expo" ? "expo" : "app";
 
   const validatePassword = (value: string) => {
     const regex = /^(?=.*[a-z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,16}$/;
@@ -82,13 +84,18 @@ export default function SignupScreen() {
     setEmailStatusMessage("");
 
     try {
-      await apiRequest(API_ENDPOINTS.EMAIL_REQUEST, {
+      const requestUrl = `${API_ENDPOINTS.EMAIL_REQUEST}?email=${encodeURIComponent(
+        email.trim(),
+      )}&origin=${originParam}`;
+
+      await apiRequest(requestUrl, {
         method: "POST",
-        body: { email },
       });
 
       setEmailStatus("sent");
-      setEmailStatusMessage("인증 메일을 발송했습니다. 메일의 링크를 확인해 주세요.");
+      setEmailStatusMessage(
+        "인증 메일을 발송했습니다. 메일의 링크를 확인해 주세요.",
+      );
     } catch (error) {
       setEmailStatus("idle");
       setEmailError(
@@ -97,31 +104,64 @@ export default function SignupScreen() {
     }
   };
 
-  const handleCheckVerification = async () => {
-    if (!isValidEmail) {
-      setEmailError("올바른 이메일을 입력해 주세요.");
+  const handleConfirmVerification = () => {
+    if (emailStatus === "verified") {
+      setEmailStatusMessage("이메일 인증이 완료되었습니다.");
       return;
     }
 
-    setEmailError("");
-    setIsCheckingEmail(true);
+    Alert.alert(
+      "인증 확인",
+      "이메일에 온 인증 링크를 눌러 주세요. 앱으로 돌아오면 자동으로 인증됩니다.",
+    );
+  };
 
-    try {
-      await apiRequest(API_ENDPOINTS.VERIFY_LINK, {
-        method: "POST",
-        body: { email },
-      });
+  useEffect(() => {
+    const handleUrl = (url: string) => {
+      const parsed = Linking.parse(url);
+      const path = parsed.path ?? "";
 
+      if (path === "signup-success" || url.startsWith("aiq://signup-success")) {
+        const emailFromLink =
+          typeof parsed.queryParams?.email === "string"
+            ? parsed.queryParams.email
+            : "";
+
+        if (emailFromLink) {
+          setEmail(emailFromLink);
+        }
+
+        setEmailStatus("verified");
+        setEmailStatusMessage("이메일 인증이 완료되었습니다.");
+      }
+    };
+
+    const subscription = Linking.addEventListener("url", ({ url }) => {
+      handleUrl(url);
+    });
+
+    Linking.getInitialURL().then((url) => {
+      if (url) handleUrl(url);
+    });
+
+    return () => subscription.remove();
+  }, []);
+
+  useEffect(() => {
+    if (!searchParams) return;
+
+    const verifiedParam = searchParams.verified;
+    const emailParam = searchParams.email;
+
+    if (typeof emailParam === "string" && emailParam) {
+      setEmail(emailParam);
+    }
+
+    if (verifiedParam === "1" || verifiedParam === "true") {
       setEmailStatus("verified");
       setEmailStatusMessage("이메일 인증이 완료되었습니다.");
-    } catch (error) {
-      setEmailError(
-        isApiError(error) ? error.message : "이메일 인증 상태를 확인할 수 없습니다.",
-      );
-    } finally {
-      setIsCheckingEmail(false);
     }
-  };
+  }, [searchParams]);
 
   const isFormValid =
     nickname.trim().length > 0 &&
@@ -166,7 +206,7 @@ export default function SignupScreen() {
       if (isApiError(error)) {
         setEmailError(error.message);
       } else {
-        Alert.alert("오류", "서버와 연결할 수 없습니다.");
+        Alert.alert("오류", "서버에 연결할 수 없습니다.");
       }
     } finally {
       setIsLoading(false);
@@ -177,60 +217,39 @@ export default function SignupScreen() {
     <SafeAreaView style={styles.safeArea}>
       <StatusBar style="light" />
 
-      <KeyboardAvoidingView
+      <KeyboardAwareScreen
         style={styles.container}
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        contentContainerStyle={styles.scrollContent}
+        lockScrollWhenKeyboardHidden
         keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 20}
       >
-        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => router.back()}
+        >
           <Image
             source={require("../../assets/images/back-icon.png")}
             style={styles.backIconImage}
           />
         </TouchableOpacity>
 
-        <ScrollView
-          style={styles.scrollView}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-          contentContainerStyle={{ paddingBottom: 50 }}
-        >
-          <View style={styles.header}>
-            <Text style={styles.title}>이메일 회원가입</Text>
-          </View>
-
           <View style={styles.profileImageContainer}>
             <View style={styles.profileImageCircle}>
-              <View style={styles.profileIcon}>
-                <Text style={styles.profileIconText}>👤</Text>
-              </View>
+              <Image
+                source={require("../../assets/images/hello-pickle.png")}
+                style={styles.profileImage}
+                resizeMode="contain"
+              />
             </View>
           </View>
 
           <View style={styles.inputContainer}>
-            <Text style={styles.label}>닉네임</Text>
-            <TextInput
-              style={[styles.input, nicknameError ? styles.inputError : null]}
-              placeholder="최초 1회 설정 후 변경 불가"
-              placeholderTextColor={AppColors.gray}
-              value={nickname}
-              onChangeText={(value) => {
-                setNickname(value);
-                setNicknameError("");
-              }}
-            />
-            {nicknameError ? (
-              <Text style={styles.errorText}>{nicknameError}</Text>
-            ) : null}
-          </View>
-
-          <View style={styles.inputContainer}>
             <Text style={styles.label}>이메일</Text>
-            <View style={styles.inlineRow}>
+            <View style={styles.inputWithButton}>
               <TextInput
                 style={[
                   styles.input,
-                  styles.inlineInput,
+                  styles.inputWithButtonField,
                   emailError ? styles.inputError : null,
                   emailStatus === "verified" ? styles.verifiedInput : null,
                 ]}
@@ -249,34 +268,17 @@ export default function SignupScreen() {
               />
               <TouchableOpacity
                 style={[
-                  styles.inlineButton,
-                  isValidEmail ? styles.inlineButtonActive : null,
+                  styles.inputButton,
+                  isValidEmail ? styles.inputButtonActive : null,
                 ]}
                 disabled={!isValidEmail || emailStatus === "sending"}
                 onPress={handleSendVerification}
               >
-                <Text style={styles.inlineButtonText}>
-                  {emailStatus === "sending" ? "발송 중" : "인증 메일"}
+                <Text style={styles.inputButtonText}>
+                  {emailStatus === "sending" ? "발송 중" : "중복확인"}
                 </Text>
               </TouchableOpacity>
             </View>
-            <TouchableOpacity
-              style={[
-                styles.verifyStatusButton,
-                emailStatus === "sent" || emailStatus === "verified"
-                  ? styles.verifyStatusButtonActive
-                  : null,
-              ]}
-              disabled={
-                !(emailStatus === "sent" || emailStatus === "verified") ||
-                isCheckingEmail
-              }
-              onPress={handleCheckVerification}
-            >
-              <Text style={styles.verifyStatusButtonText}>
-                {isCheckingEmail ? "확인 중..." : "인증 확인"}
-              </Text>
-            </TouchableOpacity>
             {emailError ? (
               <Text style={styles.errorText}>{emailError}</Text>
             ) : null}
@@ -291,6 +293,31 @@ export default function SignupScreen() {
               >
                 {emailStatusMessage}
               </Text>
+            ) : null}
+            {emailStatus === "sent" ? (
+              <TouchableOpacity
+                style={styles.verifyButton}
+                onPress={handleConfirmVerification}
+              >
+                <Text style={styles.verifyButtonText}>인증 확인</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+
+          <View style={styles.inputContainer}>
+            <Text style={styles.label}>닉네임</Text>
+            <TextInput
+              style={[styles.input, nicknameError ? styles.inputError : null]}
+              placeholder="최초 1회 설정 후 변경 불가"
+              placeholderTextColor={AppColors.gray}
+              value={nickname}
+              onChangeText={(value) => {
+                setNickname(value);
+                setNicknameError("");
+              }}
+            />
+            {nicknameError ? (
+              <Text style={styles.errorText}>{nicknameError}</Text>
             ) : null}
           </View>
 
@@ -342,7 +369,7 @@ export default function SignupScreen() {
                   styles.passwordInput,
                   passwordConfirmError ? styles.inputError : null,
                 ]}
-                placeholder="비밀번호를 한 번 더 입력해 주세요"
+                placeholder="비밀번호를 한번 더 입력해 주세요."
                 placeholderTextColor={AppColors.gray}
                 value={passwordConfirm}
                 onChangeText={(value) => {
@@ -374,10 +401,13 @@ export default function SignupScreen() {
 
           <TouchableOpacity
             style={styles.checkboxContainer}
-            onPress={() => setAgreeTerms((prev) => !prev)}
+            onPress={() => setLegalOpen(true)}
           >
             <View
-              style={[styles.checkbox, agreeTerms ? styles.checkboxChecked : null]}
+              style={[
+                styles.checkbox,
+                agreeTerms ? styles.checkboxChecked : null,
+              ]}
             >
               {agreeTerms ? <Text style={styles.checkmark}>✓</Text> : null}
             </View>
@@ -404,13 +434,16 @@ export default function SignupScreen() {
               <Text style={styles.signupButtonText}>회원가입</Text>
             )}
           </TouchableOpacity>
-        </ScrollView>
-      </KeyboardAvoidingView>
+      </KeyboardAwareScreen>
 
       <LegalModal
         description={PRIVACY_POLICY}
         open={legalOpen}
         title="개인정보처리방침"
+        onAgree={() => {
+          setAgreeTerms(true);
+          setLegalOpen(false);
+        }}
         onClose={() => setLegalOpen(false)}
       />
     </SafeAreaView>
@@ -438,8 +471,10 @@ const styles = StyleSheet.create({
     height: 20,
     tintColor: AppColors.white,
   },
-  scrollView: {
-    flex: 1,
+  scrollContent: {
+    paddingTop: 70,
+    paddingBottom: 50,
+    flexGrow: 1,
   },
   header: {
     paddingHorizontal: 43,
@@ -464,15 +499,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-  profileIcon: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  profileIconText: {
-    fontSize: 40,
+  profileImage: {
+    width: 92,
+    height: 92,
   },
   inputContainer: {
     paddingHorizontal: 43,
@@ -499,47 +528,32 @@ const styles = StyleSheet.create({
   verifiedInput: {
     borderColor: AppColors.primaryGreen,
   },
-  inlineRow: {
-    flexDirection: "row",
-    gap: 10,
+  inputWithButton: {
+    position: "relative",
   },
-  inlineInput: {
-    flex: 1,
+  inputWithButtonField: {
+    paddingRight: 88,
   },
-  inlineButton: {
-    minWidth: 92,
-    height: 50,
-    borderRadius: 8,
+  inputButton: {
+    position: "absolute",
+    right: 8,
+    top: 8,
+    height: 34,
+    paddingHorizontal: 12,
+    borderRadius: 6,
     borderWidth: 1,
     borderColor: AppColors.gray,
     justifyContent: "center",
     alignItems: "center",
-    paddingHorizontal: 10,
+    backgroundColor: "rgba(10, 10, 10, 0.6)",
   },
-  inlineButtonActive: {
+  inputButtonActive: {
     borderColor: AppColors.primaryGreen,
     backgroundColor: "rgba(63, 221, 144, 0.12)",
   },
-  inlineButtonText: {
+  inputButtonText: {
     color: AppColors.white,
     fontSize: 12,
-    fontWeight: "600",
-  },
-  verifyStatusButton: {
-    marginTop: 10,
-    height: 44,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: AppColors.gray,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  verifyStatusButtonActive: {
-    borderColor: AppColors.primaryGreen,
-  },
-  verifyStatusButtonText: {
-    color: AppColors.white,
-    fontSize: 13,
     fontWeight: "600",
   },
   passwordContainer: {
@@ -573,6 +587,20 @@ const styles = StyleSheet.create({
   },
   statusTextSuccess: {
     color: AppColors.primaryGreen,
+  },
+  verifyButton: {
+    alignSelf: "flex-start",
+    marginTop: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: AppColors.primaryGreen,
+  },
+  verifyButtonText: {
+    color: AppColors.primaryGreen,
+    fontSize: 12,
+    fontWeight: "600",
   },
   checkboxContainer: {
     flexDirection: "row",
@@ -631,3 +659,7 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
 });
+
+
+
+

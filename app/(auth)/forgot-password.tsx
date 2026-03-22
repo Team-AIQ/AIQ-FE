@@ -1,4 +1,5 @@
 import { API_ENDPOINTS } from "@/constants/api";
+import { KeyboardAwareScreen } from "@/components/keyboard-aware-screen";
 import { AppColors } from "@/constants/theme";
 import { apiRequest, isApiError } from "@/lib/api-client";
 import { useRouter } from "expo-router";
@@ -242,7 +243,7 @@ export default function ForgotPasswordScreen() {
       <SafeAreaView style={styles.safeArea}>
         <StatusBar style="light" />
 
-        <View style={styles.container}>
+        <KeyboardAwareScreen style={styles.container}>
           <TouchableOpacity style={styles.backButton} onPress={handleBack}>
             <Image
               source={require("../../assets/images/back-icon.png")}
@@ -476,7 +477,7 @@ export default function ForgotPasswordScreen() {
               </View>
             </View>
           ) : null}
-        </View>
+        </KeyboardAwareScreen>
       </SafeAreaView>
     </TouchableWithoutFeedback>
   );

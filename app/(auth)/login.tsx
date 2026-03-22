@@ -1,4 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { KeyboardAwareScreen } from "@/components/keyboard-aware-screen";
 import { API_ENDPOINTS } from "@/constants/api";
 import { AppColors } from "@/constants/theme";
 import { apiRequest, isApiError } from "@/lib/api-client";
@@ -97,7 +98,7 @@ export default function LoginScreen() {
       <SafeAreaView style={styles.safeArea}>
         <StatusBar style="light" />
 
-        <View style={styles.container}>
+        <KeyboardAwareScreen style={styles.container}>
           <TouchableOpacity
             style={styles.backButton}
             onPress={() => router.back()}
@@ -210,7 +211,7 @@ export default function LoginScreen() {
               </TouchableOpacity>
             </View>
           </View>
-        </View>
+        </KeyboardAwareScreen>
       </SafeAreaView>
     </TouchableWithoutFeedback>
   );

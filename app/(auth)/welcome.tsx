@@ -251,7 +251,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "center",
     alignItems: "center",
-    marginTop: 24,
+    marginTop: 36,
   },
   emailLink: {
     color: "#FFF",
