@@ -22,6 +22,8 @@ const PROFILE_KEY = "userProfile";
 const AI_SETTINGS_KEY = "aiProviderSettings";
 const CREDITS_KEY = "userCredits";
 const CHAT_HISTORY_KEY = "chatHistory";
+const ONBOARDING_SEEN_KEY = "onboardingSeenByUser";
+const ONBOARDING_PENDING_KEY = "onboardingPendingByUser";
 
 const DEFAULT_AI_SETTINGS: AIProviderSettings = {
   chatgpt: true,
@@ -108,9 +110,63 @@ export async function clearSessionData() {
       AI_SETTINGS_KEY,
       CREDITS_KEY,
       CHAT_HISTORY_KEY,
+      ONBOARDING_SEEN_KEY,
+      ONBOARDING_PENDING_KEY,
       "currentReportSession",
     ]),
     SecureStore.deleteItemAsync("accessToken"),
     SecureStore.deleteItemAsync("refreshToken"),
   ]);
+}
+
+type OnboardingSeenMap = Record<string, boolean>;
+
+function getOnboardingUserKey(userKey?: string) {
+  if (userKey && userKey.trim()) return userKey.trim();
+  return "anonymous";
+}
+
+async function getOnboardingSeenMap() {
+  const raw = await AsyncStorage.getItem(ONBOARDING_SEEN_KEY);
+  if (!raw) return {} as OnboardingSeenMap;
+  return JSON.parse(raw) as OnboardingSeenMap;
+}
+
+export async function hasSeenOnboarding(userKey?: string) {
+  const map = await getOnboardingSeenMap();
+  return Boolean(map[getOnboardingUserKey(userKey)]);
+}
+
+export async function markOnboardingSeen(userKey?: string) {
+  const key = getOnboardingUserKey(userKey);
+  const map = await getOnboardingSeenMap();
+  map[key] = true;
+  await AsyncStorage.setItem(ONBOARDING_SEEN_KEY, JSON.stringify(map));
+}
+
+async function getOnboardingPendingMap() {
+  const raw = await AsyncStorage.getItem(ONBOARDING_PENDING_KEY);
+  if (!raw) return {} as OnboardingSeenMap;
+  return JSON.parse(raw) as OnboardingSeenMap;
+}
+
+export async function hasPendingOnboarding(userKey?: string) {
+  const map = await getOnboardingPendingMap();
+  return Boolean(map[getOnboardingUserKey(userKey)]);
+}
+
+export async function setPendingOnboarding(userKey?: string) {
+  const key = getOnboardingUserKey(userKey);
+  const map = await getOnboardingPendingMap();
+  map[key] = true;
+  await AsyncStorage.setItem(ONBOARDING_PENDING_KEY, JSON.stringify(map));
+}
+
+export async function clearPendingOnboarding(userKey?: string) {
+  const key = getOnboardingUserKey(userKey);
+  const map = await getOnboardingPendingMap();
+  if (map[key]) {
+    delete map[key];
+    await AsyncStorage.setItem(ONBOARDING_PENDING_KEY, JSON.stringify(map));
+  }
 }

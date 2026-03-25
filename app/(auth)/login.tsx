@@ -4,10 +4,16 @@ import { API_ENDPOINTS } from "@/constants/api";
 import { AppColors } from "@/constants/theme";
 import { apiRequest, isApiError } from "@/lib/api-client";
 import { saveAuthTokens } from "@/lib/auth-storage";
-import { updateUserProfile } from "@/lib/user-session";
+import {
+  clearPendingOnboarding,
+  hasPendingOnboarding,
+  hasSeenOnboarding,
+  updateUserProfile,
+} from "@/lib/user-session";
 import type { LoginResponse } from "@/types/api";
 import { useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
+import { jwtDecode } from "jwt-decode";
 import { useState } from "react";
 import {
   Alert,
@@ -73,15 +79,39 @@ export default function LoginScreen() {
       }
 
       await saveAuthTokens(accessToken, refreshToken);
-      await updateUserProfile({ email });
+      const decoded = jwtDecode<Record<string, unknown>>(accessToken);
+      const nicknameFromToken =
+        (decoded.nickname as string | undefined) ??
+        (decoded.name as string | undefined) ??
+        (decoded.userName as string | undefined) ??
+        (decoded.username as string | undefined);
+      const emailFromToken = (decoded.email as string | undefined) ?? email;
+      await updateUserProfile({
+        email: emailFromToken,
+        nickname: nicknameFromToken,
+      });
 
       if (autoLogin) {
         await AsyncStorage.setItem("autoLogin", "true");
       } else {
         await AsyncStorage.removeItem("autoLogin");
       }
-
-      router.replace("/(auth)/onboarding");
+      const userKey =
+        (decoded.userId as number | undefined)?.toString() ?? emailFromToken ?? email;
+      const alreadySeen = await hasSeenOnboarding(userKey);
+      const pending = await hasPendingOnboarding(userKey);
+      const isNewUser =
+        (decoded.isNewUser as boolean | undefined) ??
+        (decoded.newUser as boolean | undefined) ??
+        false;
+      if (alreadySeen) {
+        router.replace("/(tabs)");
+      } else if (pending || isNewUser) {
+        await clearPendingOnboarding(userKey);
+        router.replace("/(auth)/onboarding");
+      } else {
+        router.replace("/(tabs)");
+      }
     } catch (error) {
       if (isApiError(error)) {
         Alert.alert("로그인 실패", error.message);

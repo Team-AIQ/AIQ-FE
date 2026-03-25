@@ -4,6 +4,7 @@ type RequestOptions = Omit<RequestInit, "headers" | "body"> & {
   body?: unknown;
   headers?: Record<string, string>;
   requireAuth?: boolean;
+  timeoutMs?: number;
 };
 
 export class ApiError extends Error {
@@ -56,7 +57,13 @@ export async function apiRequest<T>(
   url: string,
   options: RequestOptions = {},
 ): Promise<T> {
-  const { body, headers = {}, requireAuth = false, ...rest } = options;
+  const {
+    body,
+    headers = {},
+    requireAuth = false,
+    timeoutMs = 10000,
+    ...rest
+  } = options;
 
   const requestHeaders: Record<string, string> = {
     "Content-Type": "application/json",
@@ -72,11 +79,28 @@ export async function apiRequest<T>(
     requestHeaders.Authorization = `Bearer ${accessToken}`;
   }
 
-  const response = await fetch(url, {
-    ...rest,
-    headers: requestHeaders,
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      ...rest,
+      headers: requestHeaders,
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new ApiError(`Request timed out after ${timeoutMs}ms (${url}).`, 0, error);
+    }
+    throw new ApiError(
+      `Network error: unable to reach server (${url}). Check API base URL / Wi-Fi / backend status.`,
+      0,
+      error,
+    );
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   if (response.status === 204) {
     return undefined as T;

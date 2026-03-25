@@ -1,4 +1,7 @@
-import { MenuDrawer } from "@/components/menu-drawer";
+﻿import { MenuDrawer } from "@/components/menu-drawer";
+import { LegalModal } from "@/components/legal-modal";
+import { HELP_FAQ } from "@/constants/help";
+import StarfieldBackground from "@/components/starfield-background";
 import { API_ENDPOINTS } from "@/constants/api";
 import { AppColors } from "@/constants/theme";
 import { clearAuthTokens, getAccessToken } from "@/lib/auth-storage";
@@ -64,11 +67,6 @@ const DEFAULT_PROVIDER_SETTINGS: AIProviderSettings = {
   perplexity: true,
 };
 
-const HELP_TEXT = [
-  "검색하고 싶은 제품 조건을 자연스럽게 입력하면 AIQ가 카테고리 질문을 이어갑니다.",
-  "리포트가 생성되면 Chat GPT, Gemini, Perplexity 관점의 추천 결과를 비교할 수 있습니다.",
-  "메뉴에서 AI 응답 설정, 크레딧, 최근 대화, 프로필 편집을 관리할 수 있습니다.",
-];
 
 const REPORT_CREATING_MESSAGE = "리포트를 생성하고 있어요. 잠시만 기다려 주세요.";
 
@@ -120,6 +118,11 @@ export default function HomeScreen() {
       loadUserData();
     }, [loadUserData]),
   );
+
+  useEffect(() => {
+    if (!isMenuOpen) return;
+    loadUserData();
+  }, [isMenuOpen, loadUserData]);
 
   useEffect(() => {
     Animated.loop(
@@ -199,13 +202,13 @@ export default function HomeScreen() {
             ? "Perplexity"
             : params.provider === "chatgpt"
               ? "Chat GPT"
-              : "선택한 리포트";
+              : "선택된 리포트";
 
       setMessages([
         {
           id: `${Date.now()}-continue-0`,
           type: "ai",
-          text: `${providerLabel} 기준 리포트를 바탕으로 이어서 질문할 수 있어요.`,
+          text: `${providerLabel} 기반 리포트를 바탕으로 이어서 질문을 이어갈게요.`,
           timestamp: new Date(),
         },
         {
@@ -403,7 +406,7 @@ export default function HomeScreen() {
     try {
       const accessToken = await getAccessToken();
       if (!accessToken) {
-        Alert.alert("로그인 필요", "로그인 후 이용해 주세요.");
+        Alert.alert("로그인 필요", "로그인이 필요합니다. 로그인해 주세요.");
         return;
       }
 
@@ -449,7 +452,7 @@ export default function HomeScreen() {
       appendMessage({
         id: `${Date.now()}-error`,
         type: "ai",
-        text: "일시적인 문제가 생겼어요. 다시 시도해 주세요.",
+        text: "일시적인 문제가 발생했어요. 다시 시도해 주세요.",
         timestamp: new Date(),
       });
     } finally {
@@ -516,7 +519,7 @@ export default function HomeScreen() {
   const handleWithdraw = () => {
     Alert.alert(
       "회원탈퇴",
-      "탈퇴하면 계정과 저장된 정보가 초기화됩니다. 계속할까요?",
+      "탈퇴하면 계정과 저장된 정보가 초기화됩니다. 계속하시겠어요?",
       [
         { text: "취소", style: "cancel" },
         {
@@ -626,7 +629,7 @@ export default function HomeScreen() {
         </Animated.View>
         <Text style={styles.characterSubtitle}>만나서 반가워! 난 피클이야.</Text>
         <Text style={styles.characterSubtitle}>
-          필요한 제품 조건을 말해주면 질문을 이어갈게.
+          필요한 제품 조건만 말해주면 질문을 이어갈게.
         </Text>
       </View>
     </View>
@@ -640,6 +643,7 @@ export default function HomeScreen() {
         style={styles.container}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
+        <StarfieldBackground density={0.0002} maxOpacity={0.8} />
         <Pressable style={styles.pressableContainer} onPress={dismissKeyboard}>
           <View style={styles.header}>
             <TouchableOpacity onPress={resetConversation}>
@@ -679,7 +683,7 @@ export default function HomeScreen() {
             >
               <View style={styles.tooltip}>
                 <Text style={styles.tooltipText}>
-                  검색하고 싶은 제품 조건을 입력해 보세요
+                  검색에 필요한 제품을 입력해줘
                 </Text>
               </View>
               <View style={styles.tooltipArrow} />
@@ -743,26 +747,7 @@ export default function HomeScreen() {
         onWithdraw={handleWithdraw}
       />
 
-      <Modal
-        animationType="fade"
-        transparent
-        visible={helpOpen}
-        onRequestClose={() => setHelpOpen(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>도움말</Text>
-            {HELP_TEXT.map((line) => (
-              <Text key={line} style={styles.modalBody}>
-                • {line}
-              </Text>
-            ))}
-            <TouchableOpacity style={styles.modalButton} onPress={() => setHelpOpen(false)}>
-              <Text style={styles.modalButtonText}>닫기</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
+      <LegalModal description={HELP_FAQ} open={helpOpen} title="도움말" onClose={() => setHelpOpen(false)} />
 
       <Modal
         animationType="fade"
@@ -775,8 +760,7 @@ export default function HomeScreen() {
             <Text style={styles.modalTitle}>크레딧</Text>
             <Text style={styles.creditNumber}>{credits} credits</Text>
             <Text style={styles.modalBody}>
-              리포트 생성 시 20 크레딧이 차감됩니다. 광고 보기 버튼으로 1 크레딧을
-              적립할 수 있습니다.
+              리포트 생성 시 20 크레딧이 차감됩니다. 광고 보기 버튼으로 1 크레딧을 적립할 수 있습니다.
             </Text>
             <TouchableOpacity style={styles.modalButton} onPress={handleCreditReward}>
               <Text style={styles.modalButtonText}>광고 보고 1C 받기</Text>
@@ -1102,3 +1086,4 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
 });
+
