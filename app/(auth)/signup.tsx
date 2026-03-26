@@ -4,7 +4,7 @@ import { API_ENDPOINTS } from "@/constants/api";
 import { PRIVACY_POLICY } from "@/constants/legal";
 import { AppColors } from "@/constants/theme";
 import { apiRequest, isApiError } from "@/lib/api-client";
-import { saveUserProfile, setPendingOnboarding } from "@/lib/user-session";
+import { saveUserProfile, setCredits, setPendingOnboarding } from "@/lib/user-session";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import * as Linking from "expo-linking";
 import Constants from "expo-constants";
@@ -195,6 +195,7 @@ export default function SignupScreen() {
         nickname: nickname.trim(),
         email: email.trim(),
       });
+      await setCredits(20);
       await setPendingOnboarding(email.trim());
 
       Alert.alert("회원가입 성공", "로그인 화면으로 이동합니다.", [

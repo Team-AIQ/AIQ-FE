@@ -60,5 +60,5 @@ export const API_ENDPOINTS = {
   CURATION_ANSWER: `${API_BASE_URL}/api/v1/curation/answer`,
 
   PROFILE_UPDATE: `${API_BASE_URL}/api/user/profile`,
-  ACCOUNT_WITHDRAW: `${API_BASE_URL}/api/user/withdraw`,
+  ACCOUNT_WITHDRAW: `${API_BASE_URL}/api/auth/withdraw`,
 };

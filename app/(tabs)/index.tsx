@@ -84,15 +84,18 @@ export default function HomeScreen() {
   const [helpOpen, setHelpOpen] = useState(false);
   const [creditsOpen, setCreditsOpen] = useState(false);
   const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [credits, setCreditsState] = useState(100);
+  const [credits, setCreditsState] = useState(20);
   const [history, setHistory] = useState<ChatHistoryItem[]>([]);
   const [providerSettings, setProviderSettings] = useState<AIProviderSettings>(
     DEFAULT_PROVIDER_SETTINGS,
   );
+  const [listHeight, setListHeight] = useState(0);
+  const [contentHeight, setContentHeight] = useState(0);
   const flatListRef = useRef<FlatList>(null);
   const glowAnim = useRef(new Animated.Value(0.5)).current;
   const floatAnim = useRef(new Animated.Value(0)).current;
   const bounceAnim = useRef(new Animated.Value(0)).current;
+  const dotAnim = useRef(new Animated.Value(0)).current;
 
   const syncCredits = async (value: number) => {
     setCreditsState(value);
@@ -138,6 +141,14 @@ export default function HomeScreen() {
           useNativeDriver: false,
         }),
       ]),
+    ).start();
+
+    Animated.loop(
+      Animated.timing(dotAnim, {
+        toValue: 1,
+        duration: 1200,
+        useNativeDriver: true,
+      }),
     ).start();
 
     Animated.loop(
@@ -238,6 +249,13 @@ export default function HomeScreen() {
     }, 100);
   };
 
+  const handleContentSizeChange = (_: number, height: number) => {
+    setContentHeight(height);
+    if (listHeight > 0 && height > listHeight) {
+      scrollToBottom();
+    }
+  };
+
   const resetConversation = () => {
     setMessages([]);
     setInputText("");
@@ -256,8 +274,6 @@ export default function HomeScreen() {
     });
 
     await saveReportSession(reportSession);
-    const nextCredits = await decrementCredits(20);
-    setCreditsState(nextCredits);
     setCurationData(null);
     setCurrentQuestionIndex(0);
     setInitialQuestion("");
@@ -269,6 +285,10 @@ export default function HomeScreen() {
 
   const askNextQuestionLocal = async (answer: string) => {
     if (!curationData) return;
+    if (!Array.isArray(curationData.questions)) {
+      Alert.alert("오류", "큐레이션 질문 목록이 비어 있습니다.");
+      return;
+    }
 
     const updatedQuestions = curationData.questions.map((question, index) =>
       index === currentQuestionIndex
@@ -304,6 +324,10 @@ export default function HomeScreen() {
 
   const askNextQuestion = async (answer: string) => {
     if (!curationData) return;
+    if (!Array.isArray(curationData.questions)) {
+      Alert.alert("오류", "큐레이션 질문 목록이 비어 있습니다.");
+      return;
+    }
 
     const updatedQuestions = curationData.questions.map((question, index) =>
       index === currentQuestionIndex
@@ -317,6 +341,7 @@ export default function HomeScreen() {
       const response = await apiRequest<CurationAnswerResponse>(API_ENDPOINTS.CURATION_ANSWER, {
         method: "POST",
         requireAuth: true,
+        timeoutMs: 60000,
         body: {
           queryId: curationData.queryId,
           questionIndex: currentQuestionIndex,
@@ -326,6 +351,10 @@ export default function HomeScreen() {
       });
 
       const nextQuestions = response.questions ?? updatedQuestions;
+      if (!Array.isArray(nextQuestions)) {
+        Alert.alert("오류", "큐레이션 응답이 비어 있습니다.");
+        return;
+      }
       const nextCategoryName = response.categoryName ?? curationData.categoryName;
       const nextMessage = response.message;
 
@@ -402,6 +431,7 @@ export default function HomeScreen() {
 
   const startCuration = async (questionText: string) => {
     setIsLoading(true);
+    const previousCredits = credits;
 
     try {
       const accessToken = await getAccessToken();
@@ -409,16 +439,23 @@ export default function HomeScreen() {
         Alert.alert("로그인 필요", "로그인이 필요합니다. 로그인해 주세요.");
         return;
       }
+      const nextCredits = await decrementCredits(3);
+      setCreditsState(nextCredits);
 
       const decoded = jwtDecode<{ userId: number }>(accessToken);
       const data = await apiRequest<CurationResponse>(API_ENDPOINTS.CURATION_START, {
         method: "POST",
         requireAuth: true,
+        timeoutMs: 60000,
         body: {
           userId: decoded.userId,
           question: questionText,
         },
       });
+      if (!data || !Array.isArray(data.questions)) {
+        Alert.alert("오류", "큐레이션 응답이 비어 있습니다.");
+        return;
+      }
 
       setCurationData(data);
       setCurrentQuestionIndex(0);
@@ -445,10 +482,14 @@ export default function HomeScreen() {
 
       scrollToBottom();
     } catch (error) {
-      Alert.alert(
-        "오류",
-        isApiError(error) ? error.message : "서버와 연결할 수 없습니다.",
-      );
+      await syncCredits(previousCredits);
+      if (isApiError(error)) {
+        Alert.alert("오류", error.message);
+      } else if (error instanceof Error && error.message) {
+        Alert.alert("오류", `응답 처리 중 문제가 발생했습니다: ${error.message}`);
+      } else {
+        Alert.alert("오류", "서버와 연결할 수 없습니다.");
+      }
       appendMessage({
         id: `${Date.now()}-error`,
         type: "ai",
@@ -504,10 +545,10 @@ export default function HomeScreen() {
   };
 
   const handleCreditReward = async () => {
-    const nextValue = credits + 1;
+    const nextValue = credits + 2;
     await syncCredits(nextValue);
     setCreditsOpen(false);
-    Alert.alert("크레딧 적립", "광고 시청 보상으로 1 크레딧이 적립되었습니다.");
+    Alert.alert("크레딧 적립", "광고 시청 보상으로 2 크레딧이 적립되었습니다.");
   };
 
   const handleLogout = async () => {
@@ -606,6 +647,42 @@ export default function HomeScreen() {
     );
   };
 
+  const dotOpacity = (index: number) =>
+    dotAnim.interpolate({
+      inputRange: [0, 0.33, 0.66, 1],
+      outputRange: [
+        index === 0 ? 1 : 0.2,
+        index === 1 ? 1 : 0.2,
+        index === 2 ? 1 : 0.2,
+        index === 0 ? 1 : 0.2,
+      ],
+    });
+
+  const renderLoading = () => (
+    <View style={styles.messageContainer}>
+      <View style={styles.aiAvatarRow}>
+        <View style={styles.aiAvatar}>
+          <Image
+            source={require("../../assets/images/hello-pickle.png")}
+            style={styles.aiAvatarImage}
+            resizeMode="contain"
+          />
+        </View>
+      </View>
+      <View style={[styles.messageBubble, styles.aiBubble, styles.loadingBubble]}>
+        <Text style={styles.loadingText}>질문을 분석하고 있습니다</Text>
+        <View style={styles.loadingDots}>
+          {[0, 1, 2].map((index) => (
+            <Animated.View
+              key={index}
+              style={[styles.loadingDot, { opacity: dotOpacity(index) }]}
+            />
+          ))}
+        </View>
+      </View>
+    </View>
+  );
+
   const renderEmpty = () => (
     <View style={styles.emptyContainer}>
       <View style={styles.characterContainer}>
@@ -667,7 +744,9 @@ export default function HomeScreen() {
                 keyExtractor={(item) => item.id}
                 contentContainerStyle={styles.messagesList}
                 showsVerticalScrollIndicator={false}
-                onContentSizeChange={scrollToBottom}
+                onLayout={(event) => setListHeight(event.nativeEvent.layout.height)}
+                onContentSizeChange={handleContentSizeChange}
+                ListFooterComponent={isLoading ? renderLoading : null}
               />
             </View>
           ) : (
@@ -760,10 +839,10 @@ export default function HomeScreen() {
             <Text style={styles.modalTitle}>크레딧</Text>
             <Text style={styles.creditNumber}>{credits} credits</Text>
             <Text style={styles.modalBody}>
-              리포트 생성 시 20 크레딧이 차감됩니다. 광고 보기 버튼으로 1 크레딧을 적립할 수 있습니다.
+              리포트 생성 시 3 크레딧이 차감됩니다. 광고 보기 버튼으로 2 크레딧을 적립할 수 있습니다.
             </Text>
             <TouchableOpacity style={styles.modalButton} onPress={handleCreditReward}>
-              <Text style={styles.modalButtonText}>광고 보고 1C 받기</Text>
+              <Text style={styles.modalButtonText}>광고 보고 2C 받기</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.modalTextButton}
@@ -822,7 +901,6 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   messagesList: {
-    flexGrow: 1,
     paddingHorizontal: 12,
     paddingVertical: 12,
   },
@@ -936,6 +1014,25 @@ const styles = StyleSheet.create({
   aiText: {
     color: AppColors.white,
     fontFamily: "Galmuri9",
+  },
+  loadingBubble: {
+    alignSelf: "flex-start",
+    marginTop: 6,
+  },
+  loadingText: {
+    color: AppColors.white,
+    fontSize: 12,
+    marginBottom: 8,
+  },
+  loadingDots: {
+    flexDirection: "row",
+    gap: 6,
+  },
+  loadingDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: AppColors.primaryGreen,
   },
   tooltipContainer: {
     alignItems: "center",

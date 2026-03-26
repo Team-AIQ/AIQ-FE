@@ -64,10 +64,10 @@ export async function saveAIProviderSettings(settings: AIProviderSettings) {
 
 export async function getCredits() {
   const raw = await AsyncStorage.getItem(CREDITS_KEY);
-  if (!raw) return 100;
+  if (!raw) return 20;
 
   const parsed = Number(raw);
-  return Number.isFinite(parsed) ? parsed : 100;
+  return Number.isFinite(parsed) ? parsed : 20;
 }
 
 export async function setCredits(value: number) {
