@@ -2,9 +2,9 @@
 import { AppColors } from "@/constants/theme";
 import {
   AIProviderSettings,
-  ChatHistoryItem,
   UserProfile,
 } from "@/lib/user-session";
+import type { HistoryResponseItem } from "@/types/api";
 import {
   Modal,
   Pressable,
@@ -21,7 +21,7 @@ type MenuDrawerProps = {
   open: boolean;
   profile: UserProfile | null;
   credits: number;
-  history: ChatHistoryItem[];
+  history: HistoryResponseItem[];
   settings: AIProviderSettings;
   onClose: () => void;
   onToggleProvider: (key: keyof AIProviderSettings, value: boolean) => void;
@@ -30,7 +30,7 @@ type MenuDrawerProps = {
   onEditProfile: () => void;
   onLogout: () => void;
   onWithdraw: () => void;
-  onSelectHistory?: (item: ChatHistoryItem) => void;
+  onSelectHistory?: (item: HistoryResponseItem) => void;
 };
 
 export function MenuDrawer({
@@ -73,7 +73,7 @@ export function MenuDrawer({
     return "이전";
   };
 
-  const groupedHistory = history.reduce<Record<string, ChatHistoryItem[]>>(
+  const groupedHistory = history.reduce<Record<string, HistoryResponseItem[]>>(
     (acc, item) => {
       const label = getSectionLabel(item.createdAt);
       acc[label] = acc[label] ? [...acc[label], item] : [item];
@@ -111,42 +111,45 @@ export function MenuDrawer({
               </TouchableOpacity>
             </View>
 
-            <TouchableOpacity
-              style={[styles.profileCard, styles.profileCardSurface]}
-              onPress={onEditProfile}
-            >
-              <View style={styles.avatar}>
-                <Text style={styles.avatarText}>
-                  {profile?.nickname?.slice(0, 1).toUpperCase() || "U"}
-                </Text>
-              </View>
-              <View style={styles.profileInfo}>
-                <Text style={styles.nickname}>
-                  {profile?.nickname || "사용자"}
-                </Text>
-                <Text style={styles.email}>
-                  {profile?.email || "aiq@email.com"}
-                </Text>
-              </View>
-              <Text style={styles.editLink}>수정</Text>
-            </TouchableOpacity>
+            <View style={styles.profileRow}>
+              <TouchableOpacity
+                style={[styles.profileCard, styles.profileCardSurface]}
+                onPress={onEditProfile}
+              >
+                <View style={styles.avatar}>
+                  <Text style={styles.avatarText}>
+                    {profile?.nickname?.slice(0, 1).toUpperCase() || "U"}
+                  </Text>
+                </View>
+                <View style={styles.profileInfo}>
+                  <Text style={styles.nickname}>
+                    {profile?.nickname || "사용자"}
+                  </Text>
+                  <Text style={styles.email} numberOfLines={1}>
+                    {profile?.email || "aiq@email.com"}
+                  </Text>
+                </View>
+                <Text style={styles.editLink}>수정</Text>
+              </TouchableOpacity>
+            </View>
 
-            <View style={[styles.creditRow, styles.creditRowEmphasis]}>
-              <View>
-                <Text style={styles.sectionTitle}>크레딧</Text>
-                <Text style={styles.creditValue}>{credits} credits</Text>
+            <View style={styles.creditRowCompact}>
+              <View style={styles.creditPill}>
+                <Text style={styles.creditPillIcon}>ⓒ</Text>
+                <Text style={styles.creditPillText}>{credits} 크레딧</Text>
               </View>
               <TouchableOpacity
-                style={[styles.creditButton, styles.creditButtonEmphasis]}
+                style={styles.creditAction}
                 onPress={onOpenCredits}
               >
-                <Text style={styles.creditButtonText}>광고보기 (2c)</Text>
+                <Text style={styles.creditActionText}>광고보기 (2c)</Text>
               </TouchableOpacity>
             </View>
 
             <Text style={styles.sectionTitle}>최근 채팅</Text>
             <ScrollView
               style={[styles.historyList, styles.historyListTight]}
+              contentContainerStyle={styles.historyContent}
               showsVerticalScrollIndicator={false}
             >
               {history.length === 0 ? (
@@ -159,17 +162,19 @@ export function MenuDrawer({
                     <Text style={styles.historySectionLabel}>{label}</Text>
                     {groupedHistory[label].map((item) => (
                       <TouchableOpacity
-                        key={item.id}
+                        key={item.queryId}
                         style={[styles.historyItem, styles.historyItemCard]}
                         activeOpacity={0.7}
                         onPress={() => onSelectHistory?.(item)}
                       >
-                        <Text style={styles.historyText} numberOfLines={1}>
-                          {item.title}
-                        </Text>
-                        <Text style={styles.historyDate}>
-                          {new Date(item.createdAt).toLocaleDateString("ko-KR")}
-                        </Text>
+                        <View style={styles.historyRow}>
+                          <Text style={styles.historyText} numberOfLines={1}>
+                            {item.question}
+                          </Text>
+                          <Text style={styles.historyDate}>
+                            {new Date(item.createdAt).toLocaleDateString("ko-KR")}
+                          </Text>
+                        </View>
                       </TouchableOpacity>
                     ))}
                   </View>
@@ -177,10 +182,11 @@ export function MenuDrawer({
               )}
             </ScrollView>
 
-            <Text style={[styles.sectionTitle, styles.aiSectionTitle]}>
-              AI 응답 설정
-            </Text>
-            <View style={[styles.toggleGroup, styles.toggleGroupSpaced]}>
+            <View style={styles.aiSection}>
+              <Text style={[styles.sectionTitle, styles.aiSectionTitle]}>
+                AI 응답 설정
+              </Text>
+              <View style={[styles.toggleGroup, styles.toggleGroupSpaced]}>
               {(
                 ["chatgpt", "gemini", "perplexity"] as Array<
                   keyof AIProviderSettings
@@ -202,6 +208,7 @@ export function MenuDrawer({
                   />
                 </View>
               ))}
+              </View>
             </View>
           </SafeAreaView>
         </View>
@@ -257,15 +264,17 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "600",
   },
+  profileRow: {
+    marginBottom: 12,
+  },
   profileCard: {
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: 16,
   },
   avatar: {
-    width: 54,
-    height: 54,
-    borderRadius: 27,
+    width: 46,
+    height: 46,
+    borderRadius: 23,
     borderWidth: 1,
     borderColor: AppColors.white,
     justifyContent: "center",
@@ -282,49 +291,59 @@ const styles = StyleSheet.create({
   },
   nickname: {
     color: AppColors.white,
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: "700",
-    marginBottom: 4,
+    marginBottom: 2,
   },
   email: {
     color: AppColors.gray,
-    fontSize: 12,
+    fontSize: 11,
   },
   editLink: {
     color: AppColors.primaryGreen,
     fontSize: 12,
     fontWeight: "600",
   },
-  creditRow: {
+  creditRowCompact: {
     flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "center",
+    justifyContent: "center",
+    gap: 12,
     marginBottom: 16,
   },
-  sectionTitle: {
-    color: AppColors.white,
+  creditPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: AppColors.primaryGreen,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  creditPillIcon: {
+    color: AppColors.primaryGreen,
+    fontSize: 12,
+    marginRight: 6,
+  },
+  creditPillText: {
+    color: AppColors.primaryGreen,
     fontSize: 13,
     fontWeight: "700",
-    marginBottom: 8,
   },
-  creditValue: {
-    color: AppColors.primaryGreen,
-    fontSize: 18,
-    fontWeight: "700",
-  },
-  creditButton: {
+  creditAction: {
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.2)",
     borderRadius: 999,
-    backgroundColor: AppColors.black,
     paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingVertical: 6,
   },
-  creditButtonText: {
+  creditActionText: {
     color: AppColors.white,
     fontSize: 12,
     fontWeight: "600",
   },
   historyList: {
-    maxHeight: 250,
+    flex: 1,
     marginBottom: 16,
   },
   historyItem: {
@@ -332,14 +351,20 @@ const styles = StyleSheet.create({
     borderBottomColor: "rgba(255,255,255,0.08)",
     paddingVertical: 10,
   },
+  historyRow: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
   historyText: {
+    flex: 1,
     color: AppColors.white,
     fontSize: 12,
-    marginBottom: 4,
+    marginRight: 8,
   },
   historyDate: {
     color: AppColors.gray,
     fontSize: 11,
+    textAlign: "right",
   },
   emptyText: {
     color: AppColors.gray,
@@ -404,8 +429,10 @@ const styles = StyleSheet.create({
     borderColor: "rgba(63, 221, 144, 0.35)",
   },
   historyListTight: {
-    maxHeight: 260,
-    marginBottom: 20,
+    marginBottom: 12,
+  },
+  historyContent: {
+    paddingBottom: 8,
   },
   historySection: {
     marginBottom: 10,
@@ -424,12 +451,16 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     backgroundColor: "rgba(255, 255, 255, 0.03)",
   },
+  aiSection: {
+    marginTop: 8,
+  },
   aiSectionTitle: {
-    marginTop: 6,
+    marginTop: 12,
+    color: AppColors.white,
   },
   toggleGroupSpaced: {
     marginTop: 8,
-    marginBottom: 22,
+    marginBottom: 8,
   },
 });
 

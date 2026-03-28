@@ -57,7 +57,10 @@ export const API_ENDPOINTS = {
   PASSWORD_CHANGE: `${API_BASE_URL}/api/auth/password/change`,
 
   CURATION_START: `${API_BASE_URL}/api/v1/curation/start`,
-  CURATION_ANSWER: `${API_BASE_URL}/api/v1/curation/answer`,
+  CURATION_SUBMIT: `${API_BASE_URL}/api/v1/curation/submit`,
+  CURATION_HISTORY: `${API_BASE_URL}/api/v1/curation/history`,
+  CURATION_REPORT: `${API_BASE_URL}/api/v1/curation/history`,
+  AIQ_STREAM: `${API_BASE_URL}/api/v1/aiq/stream`,
 
   PROFILE_UPDATE: `${API_BASE_URL}/api/user/profile`,
   ACCOUNT_WITHDRAW: `${API_BASE_URL}/api/auth/withdraw`,

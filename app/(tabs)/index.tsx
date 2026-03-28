@@ -1,36 +1,35 @@
-﻿import { MenuDrawer } from "@/components/menu-drawer";
-import { LegalModal } from "@/components/legal-modal";
-import { HELP_FAQ } from "@/constants/help";
+﻿import { LegalModal } from "@/components/legal-modal";
+import { MenuDrawer } from "@/components/menu-drawer";
 import StarfieldBackground from "@/components/starfield-background";
 import { API_ENDPOINTS } from "@/constants/api";
+import { HELP_FAQ } from "@/constants/help";
 import { AppColors } from "@/constants/theme";
-import { clearAuthTokens, getAccessToken } from "@/lib/auth-storage";
 import { apiRequest, isApiError } from "@/lib/api-client";
+import { clearAuthTokens, getAccessToken } from "@/lib/auth-storage";
+import { CategoryQuestion, getReportSession } from "@/lib/report-session";
 import {
-  buildReportSession,
-  CategoryQuestion,
-  getReportSession,
-  saveReportSession,
-} from "@/lib/report-session";
-import {
-  addChatHistory,
   AIProviderSettings,
-  ChatHistoryItem,
   clearSessionData,
   decrementCredits,
   getAIProviderSettings,
-  getChatHistory,
   getCredits,
   getUserProfile,
   saveAIProviderSettings,
+  saveUserProfile,
   setCredits,
   UserProfile,
 } from "@/lib/user-session";
-import type { CurationAnswerResponse, CurationResponse } from "@/types/api";
+import type {
+  AiRecommendationResponse,
+  ApiResponse,
+  CurationResponse,
+  FinalReportResponse,
+  HistoryResponseItem,
+} from "@/types/api";
 import { useFocusEffect } from "@react-navigation/native";
-import { jwtDecode } from "jwt-decode";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
+import { jwtDecode } from "jwt-decode";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Alert,
@@ -40,6 +39,7 @@ import {
   Image,
   Keyboard,
   KeyboardAvoidingView,
+  Linking,
   Modal,
   Platform,
   Pressable,
@@ -50,6 +50,10 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import EventSource from "react-native-sse";
+import GeminiIcon from "../../assets/images/gemini-color.svg";
+import OpenAiIcon from "../../assets/images/openai.svg";
+import PerplexityIcon from "../../assets/images/perplexity-color.svg";
 
 const { height } = Dimensions.get("window");
 
@@ -59,6 +63,12 @@ type Message = {
   text: string;
   timestamp: Date;
   options?: string[];
+  kind?: "question" | "status" | "report-loading" | "report";
+  questionMeta?: {
+    index: number;
+    total: number;
+  };
+  reportData?: FinalReportResponse;
 };
 
 const DEFAULT_PROVIDER_SETTINGS: AIProviderSettings = {
@@ -67,54 +77,218 @@ const DEFAULT_PROVIDER_SETTINGS: AIProviderSettings = {
   perplexity: true,
 };
 
+type ModelKey = "GPT" | "Gemini" | "Perplexity";
 
-const REPORT_CREATING_MESSAGE = "리포트를 생성하고 있어요. 잠시만 기다려 주세요.";
+const REPORT_CREATING_MESSAGE =
+  "리포트를 생성하고 있어요. 잠시만 기다려 주세요.";
+
+type RawCurationPayload = Partial<CurationResponse> & {
+  data?: unknown;
+  result?: unknown;
+};
+
+function extractPayload(payload: RawCurationPayload | unknown) {
+  if (payload && typeof payload === "object") {
+    const record = payload as RawCurationPayload;
+    return (record.data ?? record.result ?? payload) as Record<string, unknown>;
+  }
+  return undefined;
+}
+
+function unwrapApiResponse<T>(raw: ApiResponse<T> | unknown) {
+  if (raw && typeof raw === "object") {
+    const record = raw as ApiResponse<T>;
+    if (record.data !== undefined) return record.data;
+  }
+  return null;
+}
+
+function normalizeQuestion(raw: unknown): CategoryQuestion | null {
+  if (!raw || typeof raw !== "object") return null;
+  const record = raw as Record<string, unknown>;
+  const questionText =
+    (record.question_text as string | undefined) ??
+    (record.questionText as string | undefined) ??
+    (record.question as string | undefined) ??
+    (record.text as string | undefined);
+  if (!questionText) return null;
+
+  const options =
+    (Array.isArray(record.options) && (record.options as string[])) ||
+    (Array.isArray(record.optionList) && (record.optionList as string[])) ||
+    (Array.isArray(record.option_list) && (record.option_list as string[])) ||
+    [];
+
+  return {
+    attribute_key:
+      (record.attribute_key as string | undefined) ??
+      (record.attributeKey as string | undefined) ??
+      (record.attribute as string | undefined) ??
+      "",
+    display_label:
+      (record.display_label as string | undefined) ??
+      (record.displayLabel as string | undefined) ??
+      (record.display_name as string | undefined) ??
+      (record.displayName as string | undefined) ??
+      "",
+    question_text: questionText,
+    options,
+    user_answer:
+      (record.user_answer as string | null | undefined) ??
+      (record.userAnswer as string | null | undefined) ??
+      null,
+  };
+}
+
+function normalizeCurationResponse(
+  raw: RawCurationPayload | unknown,
+): CurationResponse | null {
+  const payload = extractPayload(raw);
+  if (!payload) return null;
+
+  const rawQuestions =
+    (payload.questions as unknown) ??
+    (payload.curationQuestions as unknown) ??
+    (payload.questionList as unknown) ??
+    (payload.question_list as unknown) ??
+    [];
+  const questions = Array.isArray(rawQuestions)
+    ? rawQuestions.map(normalizeQuestion).filter(Boolean)
+    : [];
+
+  const queryId =
+    (payload.queryId as number | undefined) ??
+    (payload.query_id as number | undefined) ??
+    (payload.queryID as number | undefined);
+  const categoryName =
+    (payload.categoryName as string | undefined) ??
+    (payload.category_name as string | undefined) ??
+    (payload.category as string | undefined);
+  const message =
+    (payload.message as string | undefined) ??
+    (payload.curationMessage as string | undefined) ??
+    (payload.resultMessage as string | undefined) ??
+    "";
+
+  if (queryId == null || !categoryName) return null;
+
+  return {
+    queryId,
+    categoryName,
+    questions: questions as CategoryQuestion[],
+    message,
+  };
+}
 
 export default function HomeScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ continue?: string; provider?: string }>();
+  const params = useLocalSearchParams<{
+    continue?: string;
+    provider?: string;
+  }>();
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState("");
-  const [keyboardVisible, setKeyboardVisible] = useState(false);
-  const [curationData, setCurationData] = useState<CurationResponse | null>(null);
+  const [curationData, setCurationData] = useState<CurationResponse | null>(
+    null,
+  );
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [initialQuestion, setInitialQuestion] = useState("");
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [creditsOpen, setCreditsOpen] = useState(false);
+  const [isAwaitingConsent, setIsAwaitingConsent] = useState(false);
+  const [pendingQuestions, setPendingQuestions] = useState<
+    CategoryQuestion[] | null
+  >(null);
+  const [pendingQueryId, setPendingQueryId] = useState<number | null>(null);
+  const [isReportGenerating, setIsReportGenerating] = useState(false);
+  const [analysisStatus, setAnalysisStatus] = useState<
+    Record<string, "pending" | "complete" | "error">
+  >({});
+  const [aiResponses, setAiResponses] = useState<
+    Record<string, AiRecommendationResponse | null>
+  >({});
+  const [showTop3, setShowTop3] = useState(false);
+  const [activeReport, setActiveReport] = useState<FinalReportResponse | null>(
+    null,
+  );
+  const [openProvider, setOpenProvider] = useState<ModelKey | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [credits, setCreditsState] = useState(20);
-  const [history, setHistory] = useState<ChatHistoryItem[]>([]);
+  const [history, setHistory] = useState<HistoryResponseItem[]>([]);
   const [providerSettings, setProviderSettings] = useState<AIProviderSettings>(
     DEFAULT_PROVIDER_SETTINGS,
   );
   const [listHeight, setListHeight] = useState(0);
   const [contentHeight, setContentHeight] = useState(0);
+  const [isAtBottom, setIsAtBottom] = useState(true);
+  const [inputAreaHeight, setInputAreaHeight] = useState(0);
+  const [reportActionHeight, setReportActionHeight] = useState(0);
+  const [showTop3Info, setShowTop3Info] = useState(false);
+  const [isHistoryReport, setIsHistoryReport] = useState(false);
   const flatListRef = useRef<FlatList>(null);
   const glowAnim = useRef(new Animated.Value(0.5)).current;
   const floatAnim = useRef(new Animated.Value(0)).current;
   const bounceAnim = useRef(new Animated.Value(0)).current;
   const dotAnim = useRef(new Animated.Value(0)).current;
+  const sseRef = useRef<any>(null);
 
   const syncCredits = async (value: number) => {
     setCreditsState(value);
     await setCredits(value);
   };
 
+  const refreshProfileFromApi = useCallback(async () => {
+    try {
+      const response = await apiRequest<ApiResponse<UserProfile>>(
+        API_ENDPOINTS.PROFILE_UPDATE,
+        {
+          method: "GET",
+          requireAuth: true,
+        },
+      );
+      const data = unwrapApiResponse<UserProfile>(response);
+      if (data) {
+        setProfile(data);
+        await saveUserProfile(data);
+      }
+    } catch {
+      // Ignore profile refresh errors to keep app responsive.
+    }
+  }, []);
+
+  const refreshHistory = useCallback(async () => {
+    try {
+      const response = await apiRequest<ApiResponse<HistoryResponseItem[]>>(
+        API_ENDPOINTS.CURATION_HISTORY,
+        {
+          method: "GET",
+          requireAuth: true,
+        },
+      );
+      const data = unwrapApiResponse<HistoryResponseItem[]>(response);
+      if (Array.isArray(data)) {
+        setHistory(data);
+      }
+    } catch {
+      // Ignore history refresh errors.
+    }
+  }, []);
+
   const loadUserData = useCallback(async () => {
-    const [nextProfile, nextCredits, nextHistory, nextSettings] = await Promise.all([
+    const [storedProfile, nextCredits, nextSettings] = await Promise.all([
       getUserProfile(),
       getCredits(),
-      getChatHistory(),
       getAIProviderSettings(),
     ]);
 
-    setProfile(nextProfile);
+    setProfile(storedProfile);
     setCreditsState(nextCredits);
-    setHistory(nextHistory);
     setProviderSettings(nextSettings);
-  }, []);
+    await refreshProfileFromApi();
+    await refreshHistory();
+  }, [refreshHistory, refreshProfileFromApi]);
 
   useFocusEffect(
     useCallback(() => {
@@ -181,14 +355,18 @@ export default function HomeScreen() {
       ]),
     ).start();
 
-    const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
-    const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+    const showEvent =
+      Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvent =
+      Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
 
-    const keyboardShowListener = Keyboard.addListener(showEvent, () =>
-      setKeyboardVisible(true),
+    const keyboardShowListener = Keyboard.addListener(
+      showEvent,
+      () => undefined,
     );
-    const keyboardHideListener = Keyboard.addListener(hideEvent, () =>
-      setKeyboardVisible(false),
+    const keyboardHideListener = Keyboard.addListener(
+      hideEvent,
+      () => undefined,
     );
 
     return () => {
@@ -196,6 +374,15 @@ export default function HomeScreen() {
       keyboardHideListener.remove();
     };
   }, [bounceAnim, floatAnim, glowAnim]);
+
+  useEffect(() => {
+    return () => {
+      if (sseRef.current) {
+        sseRef.current.close?.();
+        sseRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (params.continue !== "1") return;
@@ -251,9 +438,24 @@ export default function HomeScreen() {
 
   const handleContentSizeChange = (_: number, height: number) => {
     setContentHeight(height);
-    if (listHeight > 0 && height > listHeight) {
+    if (listHeight > 0 && height > listHeight && isAtBottom) {
       scrollToBottom();
     }
+  };
+
+  const handleScroll = (event: {
+    nativeEvent: {
+      layoutMeasurement: { height: number };
+      contentOffset: { y: number };
+      contentSize: { height: number };
+    };
+  }) => {
+    const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
+    const paddingToBottom = 24;
+    const atBottom =
+      layoutMeasurement.height + contentOffset.y >=
+      contentSize.height - paddingToBottom;
+    setIsAtBottom(atBottom);
   };
 
   const resetConversation = () => {
@@ -262,28 +464,293 @@ export default function HomeScreen() {
     setCurationData(null);
     setCurrentQuestionIndex(0);
     setInitialQuestion("");
+    setIsAwaitingConsent(false);
+    setPendingQuestions(null);
+    setPendingQueryId(null);
+    setIsReportGenerating(false);
+    setOpenProvider(null);
+    setAnalysisStatus({});
+    setAiResponses({});
+    setShowTop3(false);
+    setActiveReport(null);
+    if (sseRef.current) {
+      sseRef.current.close?.();
+      sseRef.current = null;
+    }
   };
 
-  const completeReportFlow = async (questions: CategoryQuestion[]) => {
-    if (!curationData) return;
-
-    const reportSession = buildReportSession({
-      categoryName: curationData.categoryName,
-      initialQuestion,
-      questions,
+  const appendReportMessage = (report: FinalReportResponse) => {
+    setShowTop3(false);
+    setOpenProvider(null);
+    setActiveReport(report);
+    appendMessage({
+      id: `${Date.now()}-report`,
+      type: "ai",
+      text: "",
+      timestamp: new Date(),
+      kind: "report",
+      reportData: report,
     });
-
-    await saveReportSession(reportSession);
-    setCurationData(null);
-    setCurrentQuestionIndex(0);
-    setInitialQuestion("");
-    router.push("/(tabs)/report-loading");
   };
 
   const getNextPendingQuestionIndex = (questions: CategoryQuestion[]) =>
     questions.findIndex((question) => !question.user_answer);
 
-  const askNextQuestionLocal = async (answer: string) => {
+  const formatParagraph = (value?: string) => {
+    if (!value) return "";
+    return value.replace(/\s*\/\s*/g, "\n");
+  };
+
+  const renderParagraphs = (value?: string) => {
+    const formatted = formatParagraph(value);
+    if (!formatted) return null;
+    return formatted.split("\n").map((line, index) => (
+      <Text key={`para-${index}`} style={styles.reportSummaryText}>
+        {line.trim()}
+      </Text>
+    ));
+  };
+
+  const renderProviderParagraphs = (value?: string, keyPrefix = "provider") => {
+    const formatted = formatParagraph(value);
+    if (!formatted) return null;
+    return formatted.split("\n").map((line, index) => (
+      <Text
+        key={`${keyPrefix}-para-${index}`}
+        style={styles.providerDetailText}
+      >
+        {line.trim()}
+      </Text>
+    ));
+  };
+
+  const getSelectedModels = (): ModelKey[] => {
+    const models: ModelKey[] = [];
+    if (providerSettings.chatgpt) models.push("GPT");
+    if (providerSettings.gemini) models.push("Gemini");
+    if (providerSettings.perplexity) models.push("Perplexity");
+    return models.length > 0 ? models : ["GPT", "Gemini", "Perplexity"];
+  };
+
+  const initializeAnalysisStatus = (models: ModelKey[]) => {
+    const nextStatus: Record<string, "pending" | "complete" | "error"> = {};
+    models.forEach((model) => {
+      nextStatus[model] = "pending";
+    });
+    setAnalysisStatus(nextStatus);
+    setAiResponses({});
+  };
+
+  const handleModelAnswer = (model: ModelKey, payload: string) => {
+    try {
+      const data = JSON.parse(payload) as AiRecommendationResponse;
+      setAiResponses((prev) => ({ ...prev, [model]: data }));
+    } catch {
+      // Ignore parse errors for model payloads.
+    }
+    setAnalysisStatus((prev) => ({ ...prev, [model]: "complete" }));
+  };
+
+  const handleFinalReport = (payload: string) => {
+    try {
+      const report = JSON.parse(payload) as FinalReportResponse;
+      setAnalysisStatus((prev) => {
+        const next = { ...prev };
+        Object.keys(next).forEach((key) => {
+          next[key] = "complete";
+        });
+        return next;
+      });
+      appendReportMessage(report);
+      setIsReportGenerating(false);
+      setPendingQuestions(null);
+      setPendingQueryId(null);
+      setIsHistoryReport(false);
+      refreshHistory();
+      scrollToBottom();
+    } catch {
+      Alert.alert("오류", "리포트를 표시하는 중 문제가 발생했습니다.");
+      setIsReportGenerating(false);
+    }
+  };
+
+  const pollForReport = async (queryId: number) => {
+    const maxAttempts = 30;
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      try {
+        const response = await apiRequest<ApiResponse<FinalReportResponse>>(
+          `${API_ENDPOINTS.CURATION_REPORT}/${queryId}/report`,
+          {
+            method: "GET",
+            requireAuth: true,
+          },
+        );
+        const data = unwrapApiResponse<FinalReportResponse>(response);
+        if (data) {
+          handleFinalReport(JSON.stringify(data));
+          return;
+        }
+      } catch {
+        // Continue polling until report is ready.
+      }
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
+    Alert.alert("오류", "리포트 생성 시간이 초과되었습니다.");
+    setIsReportGenerating(false);
+  };
+
+  const startReportStreaming = async (queryId: number) => {
+    const models = getSelectedModels();
+    initializeAnalysisStatus(models);
+
+    const modelParam = encodeURIComponent(models.join(","));
+    const streamUrl = `${API_ENDPOINTS.AIQ_STREAM}/${queryId}?models=${modelParam}`;
+
+    const accessToken = await getAccessToken();
+    const EventSourceImpl = (globalThis as any).EventSource ?? EventSource;
+
+    if (!EventSourceImpl) {
+      await pollForReport(queryId);
+      return;
+    }
+
+    const eventSource = new EventSourceImpl(streamUrl, {
+      headers: accessToken
+        ? { Authorization: `Bearer ${accessToken}` }
+        : undefined,
+    });
+
+    sseRef.current = eventSource;
+
+    eventSource.addEventListener("GPT_ANSWER", (event: { data: string }) => {
+      handleModelAnswer("GPT", event.data);
+    });
+    eventSource.addEventListener("Gemini_ANSWER", (event: { data: string }) => {
+      handleModelAnswer("Gemini", event.data);
+    });
+    eventSource.addEventListener(
+      "Perplexity_ANSWER",
+      (event: { data: string }) => {
+        handleModelAnswer("Perplexity", event.data);
+      },
+    );
+    eventSource.addEventListener("FINAL_REPORT", (event: { data: string }) => {
+      handleFinalReport(event.data);
+    });
+    eventSource.addEventListener("ERROR", (event: { data?: string }) => {
+      setIsReportGenerating(false);
+      Alert.alert("오류", event?.data || "스트리밍 중 오류가 발생했습니다.");
+      eventSource.close();
+    });
+    eventSource.addEventListener("finish", () => {
+      eventSource.close();
+      sseRef.current = null;
+    });
+  };
+
+  const requestReportConsent = (questions: CategoryQuestion[]) => {
+    setIsAwaitingConsent(true);
+    setPendingQuestions(questions);
+    setPendingQueryId(curationData?.queryId ?? pendingQueryId);
+    setCurationData(null);
+    setCurrentQuestionIndex(0);
+
+    appendMessage({
+      id: `${Date.now()}-consent`,
+      type: "ai",
+      text: "리포트 생성 시 3크레딧이 차감됩니다. 진행할까요?",
+      timestamp: new Date(),
+      options: ["동의", "비동의"],
+      kind: "status",
+    });
+    scrollToBottom();
+  };
+
+  const handleReportConsent = async (answer: string) => {
+    const normalizedAnswer = answer.trim();
+    if (normalizedAnswer !== "동의" && normalizedAnswer !== "비동의") {
+      Alert.alert("안내", "동의 또는 비동의를 선택해 주세요.");
+      return;
+    }
+
+    setIsAwaitingConsent(false);
+    const pending = pendingQuestions;
+    setPendingQuestions(null);
+
+    if (normalizedAnswer !== "동의") {
+      appendMessage({
+        id: `${Date.now()}-consent-cancel`,
+        type: "ai",
+        text: "리포트 생성을 취소했어요. 원하면 다시 질문해 주세요.",
+        timestamp: new Date(),
+        kind: "status",
+      });
+      scrollToBottom();
+      return;
+    }
+
+    if (!pending || pending.length === 0) {
+      Alert.alert("오류", "리포트 생성에 필요한 질문이 없습니다.");
+      return;
+    }
+
+    if (!pendingQueryId) {
+      Alert.alert("오류", "리포트 생성에 필요한 질문 ID가 없습니다.");
+      return;
+    }
+
+    if (credits < 3) {
+      Alert.alert("크레딧 부족", "리포트를 생성하려면 3크레딧이 필요합니다.");
+      return;
+    }
+
+    setIsReportGenerating(true);
+    setShowTop3(false);
+    if (sseRef.current) {
+      sseRef.current.close?.();
+      sseRef.current = null;
+    }
+    const nextCredits = await decrementCredits(3);
+    await syncCredits(nextCredits);
+
+    appendMessage({
+      id: `${Date.now()}-report-loading`,
+      type: "ai",
+      text: REPORT_CREATING_MESSAGE,
+      timestamp: new Date(),
+      kind: "report-loading",
+    });
+    scrollToBottom();
+
+    try {
+      const answers = pending
+        .filter((question) => question.user_answer)
+        .map((question) => ({
+          display_label: question.display_label || question.question_text,
+          user_answer: question.user_answer ?? "",
+        }));
+
+      await apiRequest<ApiResponse<null>>(API_ENDPOINTS.CURATION_SUBMIT, {
+        method: "POST",
+        requireAuth: true,
+        body: {
+          queryId: pendingQueryId,
+          answers,
+        },
+      });
+
+      await startReportStreaming(pendingQueryId);
+    } catch (error) {
+      setIsReportGenerating(false);
+      if (isApiError(error)) {
+        Alert.alert("오류", error.message);
+      } else {
+        Alert.alert("오류", "리포트 생성 요청에 실패했습니다.");
+      }
+    }
+  };
+
+  const askNextQuestion = async (answer: string) => {
     if (!curationData) return;
     if (!Array.isArray(curationData.questions)) {
       Alert.alert("오류", "큐레이션 질문 목록이 비어 있습니다.");
@@ -307,6 +774,11 @@ export default function HomeScreen() {
         text: updatedQuestions[nextIndex].question_text,
         timestamp: new Date(),
         options: updatedQuestions[nextIndex].options,
+        kind: "question",
+        questionMeta: {
+          index: nextIndex + 1,
+          total: updatedQuestions.length,
+        },
       });
       scrollToBottom();
       return;
@@ -315,118 +787,11 @@ export default function HomeScreen() {
     appendMessage({
       id: `${Date.now()}-complete`,
       type: "ai",
-      text: REPORT_CREATING_MESSAGE,
+      text: "큐레이션이 완료되었습니다.",
       timestamp: new Date(),
     });
     scrollToBottom();
-    await completeReportFlow(updatedQuestions);
-  };
-
-  const askNextQuestion = async (answer: string) => {
-    if (!curationData) return;
-    if (!Array.isArray(curationData.questions)) {
-      Alert.alert("오류", "큐레이션 질문 목록이 비어 있습니다.");
-      return;
-    }
-
-    const updatedQuestions = curationData.questions.map((question, index) =>
-      index === currentQuestionIndex
-        ? { ...question, user_answer: answer }
-        : question,
-    );
-
-    setCurationData({ ...curationData, questions: updatedQuestions });
-
-    try {
-      const response = await apiRequest<CurationAnswerResponse>(API_ENDPOINTS.CURATION_ANSWER, {
-        method: "POST",
-        requireAuth: true,
-        timeoutMs: 60000,
-        body: {
-          queryId: curationData.queryId,
-          questionIndex: currentQuestionIndex,
-          attributeKey: curationData.questions[currentQuestionIndex]?.attribute_key,
-          answer,
-        },
-      });
-
-      const nextQuestions = response.questions ?? updatedQuestions;
-      if (!Array.isArray(nextQuestions)) {
-        Alert.alert("오류", "큐레이션 응답이 비어 있습니다.");
-        return;
-      }
-      const nextCategoryName = response.categoryName ?? curationData.categoryName;
-      const nextMessage = response.message;
-
-      setCurationData({
-        queryId: response.queryId ?? curationData.queryId,
-        categoryName: nextCategoryName,
-        questions: nextQuestions,
-        message: nextMessage ?? curationData.message,
-      });
-
-      if (nextMessage) {
-        appendMessage({
-          id: `${Date.now()}-server-message`,
-          type: "ai",
-          text: nextMessage,
-          timestamp: new Date(),
-        });
-      }
-
-      if (response.done || response.reportReady) {
-        appendMessage({
-          id: `${Date.now()}-complete`,
-          type: "ai",
-          text: REPORT_CREATING_MESSAGE,
-          timestamp: new Date(),
-        });
-        scrollToBottom();
-        await completeReportFlow(nextQuestions);
-        return;
-      }
-
-      if (response.nextQuestion) {
-        const nextIndex = nextQuestions.findIndex(
-          (question) => question.attribute_key === response.nextQuestion?.attribute_key,
-        );
-        setCurrentQuestionIndex(nextIndex >= 0 ? nextIndex : currentQuestionIndex + 1);
-        appendMessage({
-          id: `${Date.now()}-next`,
-          type: "ai",
-          text: response.nextQuestion.question_text,
-          timestamp: new Date(),
-          options: response.nextQuestion.options,
-        });
-        scrollToBottom();
-        return;
-      }
-
-      const pendingIndex = getNextPendingQuestionIndex(nextQuestions);
-      if (pendingIndex >= 0) {
-        setCurrentQuestionIndex(pendingIndex);
-        appendMessage({
-          id: `${Date.now()}-next`,
-          type: "ai",
-          text: nextQuestions[pendingIndex].question_text,
-          timestamp: new Date(),
-          options: nextQuestions[pendingIndex].options,
-        });
-        scrollToBottom();
-        return;
-      }
-
-      appendMessage({
-        id: `${Date.now()}-complete`,
-        type: "ai",
-        text: REPORT_CREATING_MESSAGE,
-        timestamp: new Date(),
-      });
-      scrollToBottom();
-      await completeReportFlow(nextQuestions);
-    } catch {
-      await askNextQuestionLocal(answer);
-    }
+    requestReportConsent(updatedQuestions);
   };
 
   const startCuration = async (questionText: string) => {
@@ -439,44 +804,54 @@ export default function HomeScreen() {
         Alert.alert("로그인 필요", "로그인이 필요합니다. 로그인해 주세요.");
         return;
       }
-      const nextCredits = await decrementCredits(3);
-      setCreditsState(nextCredits);
 
       const decoded = jwtDecode<{ userId: number }>(accessToken);
-      const data = await apiRequest<CurationResponse>(API_ENDPOINTS.CURATION_START, {
-        method: "POST",
-        requireAuth: true,
-        timeoutMs: 60000,
-        body: {
-          userId: decoded.userId,
-          question: questionText,
+      const data = await apiRequest<ApiResponse<CurationResponse>>(
+        API_ENDPOINTS.CURATION_START,
+        {
+          method: "POST",
+          requireAuth: true,
+          timeoutMs: 60000,
+          body: {
+            userId: decoded.userId,
+            question: questionText,
+          },
         },
-      });
-      if (!data || !Array.isArray(data.questions)) {
+      );
+      const normalized = normalizeCurationResponse(data);
+      if (!normalized || !Array.isArray(normalized.questions)) {
+        await syncCredits(previousCredits);
         Alert.alert("오류", "큐레이션 응답이 비어 있습니다.");
         return;
       }
 
-      setCurationData(data);
+      setCurationData(normalized);
+      setPendingQueryId(normalized.queryId);
       setCurrentQuestionIndex(0);
       setInitialQuestion(questionText);
-      await addChatHistory(questionText);
-      setHistory(await getChatHistory());
+      await refreshHistory();
 
       appendMessage({
         id: `${Date.now()}-category`,
         type: "ai",
-        text: data.message || `${data.categoryName} 카테고리로 정리했어요.`,
+        text:
+          normalized.message ||
+          `${normalized.categoryName} 카테고리로 정리했어요.`,
         timestamp: new Date(),
       });
 
-      if (data.questions.length > 0) {
+      if (normalized.questions.length > 0) {
         appendMessage({
           id: `${Date.now()}-question`,
           type: "ai",
-          text: data.questions[0].question_text,
+          text: normalized.questions[0].question_text,
           timestamp: new Date(),
-          options: data.questions[0].options,
+          options: normalized.questions[0].options,
+          kind: "question",
+          questionMeta: {
+            index: 1,
+            total: normalized.questions.length,
+          },
         });
       }
 
@@ -486,7 +861,10 @@ export default function HomeScreen() {
       if (isApiError(error)) {
         Alert.alert("오류", error.message);
       } else if (error instanceof Error && error.message) {
-        Alert.alert("오류", `응답 처리 중 문제가 발생했습니다: ${error.message}`);
+        Alert.alert(
+          "오류",
+          `응답 처리 중 문제가 발생했습니다: ${error.message}`,
+        );
       } else {
         Alert.alert("오류", "서버와 연결할 수 없습니다.");
       }
@@ -513,6 +891,11 @@ export default function HomeScreen() {
     });
     setInputText("");
 
+    if (isAwaitingConsent) {
+      await handleReportConsent(questionText);
+      return;
+    }
+
     if (curationData) {
       await askNextQuestion(questionText);
       return;
@@ -530,6 +913,10 @@ export default function HomeScreen() {
       text: option,
       timestamp: new Date(),
     });
+    if (isAwaitingConsent) {
+      await handleReportConsent(option);
+      return;
+    }
     await askNextQuestion(option);
   };
 
@@ -576,7 +963,56 @@ export default function HomeScreen() {
     );
   };
 
-  const firstUserMessageId = messages.find((message) => message.type === "user")?.id;
+  const handleSelectHistory = async (item: HistoryResponseItem) => {
+    setIsMenuOpen(false);
+    try {
+      const response = await apiRequest<ApiResponse<FinalReportResponse>>(
+        `${API_ENDPOINTS.CURATION_REPORT}/${item.queryId}/report`,
+        {
+          method: "GET",
+          requireAuth: true,
+        },
+      );
+      const report = unwrapApiResponse<FinalReportResponse>(response);
+      if (!report) {
+        Alert.alert("안내", "리포트를 생성하지 않았습니다.");
+        return;
+      }
+
+      setMessages([]);
+      setCurationData(null);
+      setIsAwaitingConsent(false);
+      setPendingQuestions(null);
+      setPendingQueryId(null);
+      setIsReportGenerating(false);
+      setAnalysisStatus({});
+      setAiResponses({});
+      setShowTop3(false);
+      setIsHistoryReport(true);
+      appendReportMessage(report);
+      scrollToBottom();
+    } catch (error) {
+      Alert.alert("안내", "리포트를 생성하지 않았습니다.");
+    }
+  };
+
+  const handleLinkPress = async (url: string) => {
+    try {
+      const supported = await Linking.canOpenURL(url);
+      if (supported) {
+        await Linking.openURL(url);
+      }
+    } catch {
+      // Ignore link open failures.
+    }
+  };
+
+  const firstUserMessageId = messages.find(
+    (message) => message.type === "user",
+  )?.id;
+  const firstAiMessageId = messages.find(
+    (message) => message.type === "ai",
+  )?.id;
   const glowRadius = glowAnim.interpolate({
     inputRange: [0.3, 0.6],
     outputRange: [10, 18],
@@ -586,6 +1022,7 @@ export default function HomeScreen() {
     const isUser = item.type === "user";
     const isFirstUserMessage = isUser && item.id === firstUserMessageId;
     const hasOptions = !isUser && item.options && item.options.length > 0;
+    const showQuestionMeta = item.kind === "question" && item.questionMeta;
 
     return (
       <View
@@ -594,7 +1031,7 @@ export default function HomeScreen() {
           isUser ? styles.userMessageContainer : styles.aiMessageContainer,
         ]}
       >
-        {!isUser ? (
+        {!isUser && item.id === firstAiMessageId ? (
           <View style={styles.aiAvatarRow}>
             <View style={styles.aiAvatar}>
               <Image
@@ -608,26 +1045,248 @@ export default function HomeScreen() {
         {isFirstUserMessage ? (
           <View style={styles.userAvatarRow}>
             <View style={styles.userAvatar}>
-              <Text style={styles.userAvatarIcon}>U</Text>
+              <Text style={styles.userAvatarIcon}>
+                {(profile?.nickname || "U").slice(0, 1).toUpperCase()}
+              </Text>
             </View>
           </View>
         ) : null}
 
-        <View
-          style={[
-            styles.messageBubble,
-            isUser ? styles.userBubble : styles.aiBubble,
-          ]}
-        >
-          <Text
+        {item.kind === "report-loading" ? (
+          <View
             style={[
-              styles.messageText,
-              isUser ? styles.userText : styles.aiText,
+              styles.messageBubble,
+              styles.aiBubble,
+              styles.reportLoadingBubble,
             ]}
           >
-            {item.text}
-          </Text>
-        </View>
+            <Text style={styles.reportLoadingTitle}>
+              최적의 답변을 생성하고 있습니다
+            </Text>
+            <View style={styles.loadingDots}>
+              {[0, 1, 2, 3, 4].map((index) => (
+                <Animated.View
+                  key={`report-dot-${index}`}
+                  style={[styles.loadingDot, { opacity: dotOpacity(index) }]}
+                />
+              ))}
+            </View>
+            <View style={styles.providerStatusList}>
+              {(["GPT", "Gemini", "Perplexity"] as ModelKey[]).map((model) => {
+                const status = analysisStatus[model];
+                const label =
+                  model === "GPT"
+                    ? "Chat GPT"
+                    : model === "Gemini"
+                      ? "Gemini"
+                      : "Perplexity";
+                const statusLabel =
+                  status === "complete"
+                    ? "분석 완료"
+                    : status === "error"
+                      ? "오류"
+                      : "분석 중...";
+                return (
+                  <View key={model} style={styles.providerStatusRow}>
+                    <View style={styles.providerStatusLeft}>
+                      <View style={styles.providerStatusBullet} />
+                      <Text style={styles.providerStatusLabel}>{label}</Text>
+                    </View>
+                    <Text style={styles.providerStatusValue}>
+                      {statusLabel}
+                    </Text>
+                  </View>
+                );
+              })}
+            </View>
+          </View>
+        ) : item.kind === "report" && item.reportData ? (
+          <View style={styles.reportCard}>
+            <Text style={styles.reportSectionTitle}>추천 제품 TOP 1</Text>
+            {item.reportData.topProducts &&
+            item.reportData.topProducts.length > 0 ? (
+              <View style={styles.topProductGroup}>
+                {(showTop3
+                  ? item.reportData.topProducts
+                  : item.reportData.topProducts.slice(0, 1)
+                )
+                  .sort((a, b) => a.rank - b.rank)
+                  .map((product) => (
+                    <View
+                      key={`${product.productCode}-${product.rank}`}
+                      style={styles.topProductCard}
+                    >
+                      <Text style={styles.topProductName}>
+                        {product.productName}
+                      </Text>
+                      <Text style={styles.topProductPrice}>
+                        {product.price}
+                      </Text>
+                      {product.productImage ? (
+                        <Image
+                          source={{ uri: product.productImage }}
+                          style={styles.productImage}
+                          resizeMode="contain"
+                        />
+                      ) : null}
+                      <View style={styles.specsRow}>
+                        {Object.entries(product.specs || {}).map(
+                          ([key, value]) => (
+                            <View
+                              key={`${product.productCode}-${key}`}
+                              style={styles.specChip}
+                            >
+                              <Text style={styles.specChipText}>
+                                {key}: {value}
+                              </Text>
+                            </View>
+                          ),
+                        )}
+                      </View>
+                      <Text style={styles.topProductReason}>
+                        {product.comparativeAnalysis}
+                      </Text>
+                      <TouchableOpacity
+                        style={styles.buyButton}
+                        onPress={() => handleLinkPress(product.lowestPriceLink)}
+                      >
+                        <Text style={styles.buyButtonText}>구매하기</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+              </View>
+            ) : (
+              <Text style={styles.reportEmptyText}>
+                추천 제품 정보를 불러올 수 없습니다.
+              </Text>
+            )}
+
+            <Text style={styles.reportSectionTitle}>AIQ 통합 분석 리포트</Text>
+            <View style={styles.reportSummaryContainer}>
+              <View style={styles.reportSummarySection}>
+                <Text style={styles.reportSummaryTitle}>AI 공통 핵심 합의</Text>
+                <View style={styles.reportParagraphGroup}>
+                  {renderParagraphs(item.reportData.consensus)}
+                </View>
+              </View>
+
+              <View style={styles.reportSummaryDivider} />
+
+              <View style={styles.reportSummarySection}>
+                <Text style={styles.reportSummaryTitle}>
+                  모델별 판단 근거 분석
+                </Text>
+                <View style={styles.reportParagraphGroup}>
+                  {renderParagraphs(item.reportData.decisionBranches)}
+                </View>
+              </View>
+
+              <View style={styles.reportSummaryDivider} />
+
+              <View style={styles.reportSummarySection}>
+                <Text style={styles.reportSummaryTitle}>AIQ 추천 이유</Text>
+                <View style={styles.reportParagraphGroup}>
+                  {renderParagraphs(item.reportData.aiqRecommendationReason)}
+                </View>
+              </View>
+
+              {item.reportData.finalWord ? (
+                <>
+                  <View style={styles.reportSummaryDivider} />
+                  <View style={styles.reportSummarySection}>
+                    <Text style={styles.reportSummaryTitle}>마지막 한마디</Text>
+                    <View style={styles.reportParagraphGroup}>
+                      {renderParagraphs(item.reportData.finalWord)}
+                    </View>
+                  </View>
+                </>
+              ) : null}
+            </View>
+
+            <Text style={styles.reportSectionTitle}>AI 답변 보기</Text>
+            <View style={styles.providerToggleGroup}>
+              {(["GPT", "Gemini", "Perplexity"] as ModelKey[]).map((model) => {
+                const isOpen = openProvider === model;
+                const label = model === "GPT" ? "Chat GPT" : model;
+                const response = aiResponses[model];
+                const IconComponent =
+                  model === "GPT"
+                    ? OpenAiIcon
+                    : model === "Gemini"
+                      ? GeminiIcon
+                      : PerplexityIcon;
+                return (
+                  <View key={model} style={styles.providerToggleCard}>
+                    <TouchableOpacity
+                      style={styles.providerToggleHeader}
+                      onPress={() => setOpenProvider(isOpen ? null : model)}
+                    >
+                      <View style={styles.providerTitleRow}>
+                        <View style={[styles.providerAvatar]}>
+                          <IconComponent width={18} height={18} />
+                        </View>
+                        <Text style={styles.providerToggleTitle}>{label}</Text>
+                      </View>
+                      <Text style={styles.providerToggleAction}>
+                        {isOpen ? "닫기" : "상세보기"}
+                      </Text>
+                    </TouchableOpacity>
+                    {isOpen ? (
+                      <View style={styles.providerToggleBody}>
+                        {response?.specGuide ? (
+                          renderProviderParagraphs(response.specGuide, model)
+                        ) : (
+                          <Text style={styles.providerDetailText}>
+                            응답을 불러오지 못했습니다.
+                          </Text>
+                        )}
+                        {response?.recommendations?.map((rec, index) => (
+                          <Text
+                            key={`${model}-rec-${index}`}
+                            style={styles.providerDetailText}
+                          >
+                            - {rec.productName}
+                          </Text>
+                        ))}
+                      </View>
+                    ) : null}
+                  </View>
+                );
+              })}
+            </View>
+          </View>
+        ) : (
+          <View
+            style={[
+              styles.messageBubble,
+              isUser ? styles.userBubble : styles.aiBubble,
+            ]}
+          >
+            {showQuestionMeta ? (
+              <Text
+                style={[
+                  styles.messageText,
+                  isUser ? styles.userText : styles.aiText,
+                ]}
+              >
+                {item.text}
+                {"  "}
+                <Text style={styles.questionBadgeInline}>
+                  {item.questionMeta!.index}/{item.questionMeta!.total}
+                </Text>
+              </Text>
+            ) : (
+              <Text
+                style={[
+                  styles.messageText,
+                  isUser ? styles.userText : styles.aiText,
+                ]}
+              >
+                {item.text}
+              </Text>
+            )}
+          </View>
+        )}
 
         {hasOptions ? (
           <View style={styles.optionsContainer}>
@@ -637,6 +1296,7 @@ export default function HomeScreen() {
                 style={styles.optionButton}
                 onPress={() => handleOptionSelect(option)}
                 activeOpacity={0.7}
+                disabled={isLoading || isReportGenerating}
               >
                 <Text style={styles.optionButtonText}>{option}</Text>
               </TouchableOpacity>
@@ -647,32 +1307,31 @@ export default function HomeScreen() {
     );
   };
 
-  const dotOpacity = (index: number) =>
-    dotAnim.interpolate({
-      inputRange: [0, 0.33, 0.66, 1],
-      outputRange: [
-        index === 0 ? 1 : 0.2,
-        index === 1 ? 1 : 0.2,
-        index === 2 ? 1 : 0.2,
-        index === 0 ? 1 : 0.2,
-      ],
+  const dotOpacity = (index: number) => {
+    const dim = 0.2;
+    const bright = 1;
+    const outputRanges: Record<number, number[]> = {
+      0: [bright, dim, dim, dim, dim, bright],
+      1: [dim, bright, dim, dim, dim, dim],
+      2: [dim, dim, bright, dim, dim, dim],
+      3: [dim, dim, dim, bright, dim, dim],
+      4: [dim, dim, dim, dim, bright, dim],
+    };
+
+    return dotAnim.interpolate({
+      inputRange: [0, 0.2, 0.4, 0.6, 0.8, 1],
+      outputRange: outputRanges[index] ?? outputRanges[0],
     });
+  };
 
   const renderLoading = () => (
     <View style={styles.messageContainer}>
-      <View style={styles.aiAvatarRow}>
-        <View style={styles.aiAvatar}>
-          <Image
-            source={require("../../assets/images/hello-pickle.png")}
-            style={styles.aiAvatarImage}
-            resizeMode="contain"
-          />
-        </View>
-      </View>
-      <View style={[styles.messageBubble, styles.aiBubble, styles.loadingBubble]}>
+      <View
+        style={[styles.messageBubble, styles.aiBubble, styles.loadingBubble]}
+      >
         <Text style={styles.loadingText}>질문을 분석하고 있습니다</Text>
         <View style={styles.loadingDots}>
-          {[0, 1, 2].map((index) => (
+          {[0, 1, 2, 3, 4].map((index) => (
             <Animated.View
               key={index}
               style={[styles.loadingDot, { opacity: dotOpacity(index) }]}
@@ -700,11 +1359,16 @@ export default function HomeScreen() {
         >
           <Animated.Image
             source={require("../../assets/images/hello-pickle.png")}
-            style={[styles.characterImage, { transform: [{ translateY: floatAnim }] }]}
+            style={[
+              styles.characterImage,
+              { transform: [{ translateY: floatAnim }] },
+            ]}
             resizeMode="contain"
           />
         </Animated.View>
-        <Text style={styles.characterSubtitle}>만나서 반가워! 난 피클이야.</Text>
+        <Text style={styles.characterSubtitle}>
+          만나서 반가워! 난 피클이야.
+        </Text>
         <Text style={styles.characterSubtitle}>
           필요한 제품 조건만 말해주면 질문을 이어갈게.
         </Text>
@@ -719,9 +1383,10 @@ export default function HomeScreen() {
       <KeyboardAvoidingView
         style={styles.container}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 12 : 0}
       >
         <StarfieldBackground density={0.0002} maxOpacity={0.8} />
-        <Pressable style={styles.pressableContainer} onPress={dismissKeyboard}>
+        <View style={styles.pressableContainer}>
           <View style={styles.header}>
             <TouchableOpacity onPress={resetConversation}>
               <Image
@@ -730,27 +1395,99 @@ export default function HomeScreen() {
                 resizeMode="contain"
               />
             </TouchableOpacity>
-            <TouchableOpacity style={styles.menuButton} onPress={() => setIsMenuOpen(true)}>
+            <TouchableOpacity
+              style={styles.menuButton}
+              onPress={() => setIsMenuOpen(true)}
+            >
               <Text style={styles.menuIcon}>☰</Text>
             </TouchableOpacity>
           </View>
 
           {messages.length > 0 ? (
-            <View style={styles.chatBorderContainer}>
-              <FlatList
-                ref={flatListRef}
-                data={messages}
-                renderItem={renderMessage}
-                keyExtractor={(item) => item.id}
-                contentContainerStyle={styles.messagesList}
-                showsVerticalScrollIndicator={false}
-                onLayout={(event) => setListHeight(event.nativeEvent.layout.height)}
-                onContentSizeChange={handleContentSizeChange}
-                ListFooterComponent={isLoading ? renderLoading : null}
-              />
-            </View>
+            <>
+              <View
+                style={styles.chatBorderContainer}
+                onTouchStart={dismissKeyboard}
+              >
+                <FlatList
+                  ref={flatListRef}
+                  data={messages}
+                  renderItem={renderMessage}
+                  keyExtractor={(item) => item.id}
+                  contentContainerStyle={[
+                    styles.messagesList,
+                    {
+                      paddingBottom: Math.max(12, inputAreaHeight + 12),
+                    },
+                  ]}
+                  showsVerticalScrollIndicator={false}
+                  keyboardShouldPersistTaps="handled"
+                  onScroll={handleScroll}
+                  onScrollBeginDrag={dismissKeyboard}
+                  scrollEventThrottle={16}
+                  onLayout={(event) =>
+                    setListHeight(event.nativeEvent.layout.height)
+                  }
+                  onContentSizeChange={handleContentSizeChange}
+                  ListFooterComponent={
+                    <View>
+                      {isLoading ? renderLoading() : null}
+                      <View style={styles.listSpacer} />
+                    </View>
+                  }
+                />
+              </View>
+
+              {activeReport && !isHistoryReport ? (
+                <View
+                  style={styles.reportActionArea}
+                  onLayout={(event) =>
+                    setReportActionHeight(event.nativeEvent.layout.height)
+                  }
+                >
+                  {!showTop3 && activeReport?.topProducts?.length > 1 ? (
+                    <View style={styles.top3ButtonContainer}>
+                      <TouchableOpacity
+                        style={styles.reportActionButton}
+                        onPress={() => {
+                          setShowTop3(true);
+                          refreshHistory();
+                        }}
+                      >
+                        <Text style={styles.reportActionText}>
+                          TOP3까지 확인하기
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.infoButton}
+                        onPress={() => setShowTop3Info(!showTop3Info)}
+                      >
+                        <Text style={styles.infoButtonText}>?</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ) : null}
+                  <TouchableOpacity
+                    style={styles.reportActionButton}
+                    onPress={() => {
+                      refreshHistory();
+                      Alert.alert("완료", "리포트를 히스토리에 저장했습니다.");
+                      setActiveReport(null);
+                      setShowTop3(false);
+                      setIsHistoryReport(false);
+                      setTimeout(() => {
+                        flatListRef.current?.scrollToEnd({ animated: true });
+                      }, 150);
+                    }}
+                  >
+                    <Text style={styles.reportActionText}>완료하기</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : null}
+            </>
           ) : (
-            <View style={styles.emptyWrapper}>{renderEmpty()}</View>
+            <Pressable style={styles.emptyWrapper} onPress={dismissKeyboard}>
+              {renderEmpty()}
+            </Pressable>
           )}
 
           {messages.length === 0 ? (
@@ -769,22 +1506,74 @@ export default function HomeScreen() {
             </Animated.View>
           ) : null}
 
-          <View style={styles.inputContainer}>
+          {/* TOP3 정보 모달 */}
+          <Modal
+            animationType="fade"
+            transparent
+            visible={showTop3Info}
+            onRequestClose={() => setShowTop3Info(false)}
+          >
+            <View style={styles.top3ModalOverlay}>
+              <View style={styles.top3ModalContent}>
+                <Text style={styles.top3ModalTitle}>TOP3까지 확인하기</Text>
+                <Text style={styles.top3ModalSubtitle}>
+                  하나만 보기엔 아쉬우셨나요? 이제 TOP3까지 한눈에!
+                </Text>
+
+                <View style={styles.top3ModalImagePlaceholder}>
+                  <Image
+                    source={require("@/assets/images/top3.png")}
+                    style={styles.top3ModalImage}
+                    defaultSource={require("@/assets/images/top3.png")}
+                  />
+                </View>
+
+                <Text style={styles.top3ModalBody}>
+                  최고점 제품부터 차순위 아이템까지, 여러 AI 모델이 엄선한 상위
+                  3개 제품을 지금 바로 확인해 보세요.
+                </Text>
+
+                <TouchableOpacity
+                  style={styles.top3ModalClose}
+                  onPress={() => setShowTop3Info(false)}
+                >
+                  <Text style={styles.top3ModalCloseText}>닫기</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </Modal>
+
+          <View
+            style={styles.inputContainer}
+            onLayout={(event) =>
+              setInputAreaHeight(event.nativeEvent.layout.height)
+            }
+          >
             <View style={styles.inputWrapper}>
               <TextInput
                 style={styles.input}
-                placeholder="무엇이든 물어보세요"
+                placeholder={
+                  isReportGenerating
+                    ? "리포트를 생성하고 있습니다..."
+                    : "무엇이든 물어보세요"
+                }
                 placeholderTextColor={AppColors.gray}
                 value={inputText}
                 onChangeText={setInputText}
                 onSubmitEditing={handleSend}
                 multiline
                 maxLength={500}
+                editable={!isReportGenerating && !isLoading && !activeReport}
               />
               <TouchableOpacity
                 style={styles.sendButton}
                 onPress={handleSend}
-                disabled={!inputText.trim()}
+                disabled={
+                  !inputText.trim() ||
+                  isLoading ||
+                  isReportGenerating ||
+                  !!activeReport
+                }
               >
                 <Image
                   source={
@@ -797,9 +1586,8 @@ export default function HomeScreen() {
                 />
               </TouchableOpacity>
             </View>
-
           </View>
-        </Pressable>
+        </View>
       </KeyboardAvoidingView>
 
       <MenuDrawer
@@ -824,9 +1612,15 @@ export default function HomeScreen() {
         }}
         onLogout={handleLogout}
         onWithdraw={handleWithdraw}
+        onSelectHistory={handleSelectHistory}
       />
 
-      <LegalModal description={HELP_FAQ} open={helpOpen} title="도움말" onClose={() => setHelpOpen(false)} />
+      <LegalModal
+        description={HELP_FAQ}
+        open={helpOpen}
+        title="도움말"
+        onClose={() => setHelpOpen(false)}
+      />
 
       <Modal
         animationType="fade"
@@ -839,9 +1633,13 @@ export default function HomeScreen() {
             <Text style={styles.modalTitle}>크레딧</Text>
             <Text style={styles.creditNumber}>{credits} credits</Text>
             <Text style={styles.modalBody}>
-              리포트 생성 시 3 크레딧이 차감됩니다. 광고 보기 버튼으로 2 크레딧을 적립할 수 있습니다.
+              리포트 생성 시 3 크레딧이 차감됩니다. 광고 보기 버튼으로 2
+              크레딧을 적립할 수 있습니다.
             </Text>
-            <TouchableOpacity style={styles.modalButton} onPress={handleCreditReward}>
+            <TouchableOpacity
+              style={styles.modalButton}
+              onPress={handleCreditReward}
+            >
               <Text style={styles.modalButtonText}>광고 보고 2C 받기</Text>
             </TouchableOpacity>
             <TouchableOpacity
@@ -977,8 +1775,8 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   messageBubble: {
-    maxWidth: "75%",
-    paddingHorizontal: 16,
+    maxWidth: "80%",
+    paddingHorizontal: 14,
     paddingVertical: 12,
     borderRadius: 20,
   },
@@ -1003,12 +1801,15 @@ const styles = StyleSheet.create({
     elevation: 5,
   },
   messageText: {
-    fontSize: 12.5,
-    lineHeight: 22,
+    fontSize: 12,
+    lineHeight: 20,
+    flexShrink: 1,
+    textAlign: "left",
+    paddingBottom: 2,
   },
   userText: {
     color: AppColors.black,
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: "bold",
   },
   aiText: {
@@ -1033,6 +1834,9 @@ const styles = StyleSheet.create({
     height: 6,
     borderRadius: 3,
     backgroundColor: AppColors.primaryGreen,
+  },
+  listSpacer: {
+    height: 8,
   },
   tooltipContainer: {
     alignItems: "center",
@@ -1108,15 +1912,265 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     marginTop: 10,
+    gap: 6,
+  },
+  questionBadgeInline: {
+    borderRadius: 999,
+    paddingHorizontal: 9,
+    paddingVertical: 2,
+    backgroundColor: "rgba(63, 221, 144, 0.18)",
+    color: AppColors.primaryGreen,
+    fontSize: 11,
+    fontWeight: "800",
+    borderWidth: 1,
+    borderColor: "rgba(63, 221, 144, 0.6)",
+    shadowColor: AppColors.primaryGreen,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.6,
+    shadowRadius: 6,
+    elevation: 6,
+  },
+  reportLoadingBubble: {
+    maxWidth: "90%",
+  },
+  reportLoadingTitle: {
+    color: AppColors.primaryGreen,
+    fontSize: 13,
+    fontWeight: "700",
+    marginBottom: 10,
+  },
+  providerStatusList: {
+    marginTop: 8,
+    gap: 6,
+  },
+  providerStatusRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  providerStatusLeft: {
+    flexDirection: "row",
+    alignItems: "center",
     gap: 8,
+  },
+  providerStatusBullet: {
+    width: 5,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: AppColors.primaryGreen,
+  },
+  providerStatusLabel: {
+    color: AppColors.primaryGreen,
+    fontSize: 12,
+  },
+  providerStatusValue: {
+    color: "rgba(63, 221, 144, 0.7)",
+    fontSize: 12,
+  },
+  reportCard: {
+    width: "100%",
+    backgroundColor: "rgba(0, 0, 0, 0.85)",
+    borderRadius: 16,
+    padding: 16,
+    gap: 16,
+  },
+  reportSectionTitle: {
+    color: AppColors.primaryGreen,
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  topProductGroup: {
+    gap: 16,
+  },
+  topProductCard: {
+    backgroundColor: "rgba(17, 17, 17, 0.9)",
+    borderRadius: 12,
+    padding: 14,
+    gap: 10,
+  },
+  topProductName: {
+    color: AppColors.white,
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  topProductPrice: {
+    color: AppColors.primaryGreen,
+    fontSize: 16,
+    fontWeight: "700",
+  },
+  productImage: {
+    width: "100%",
+    height: 180,
+    borderRadius: 10,
+    backgroundColor: "rgba(0,0,0,0.4)",
+  },
+  specsRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+  },
+  specChip: {
+    borderWidth: 1,
+    borderColor: "rgba(63, 221, 144, 0.4)",
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  specChipText: {
+    color: AppColors.lightGray,
+    fontSize: 11,
+  },
+  topProductReason: {
+    color: AppColors.white,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  buyButton: {
+    alignSelf: "flex-end",
+    borderWidth: 1,
+    borderColor: AppColors.primaryGreen,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+  },
+  buyButtonText: {
+    color: AppColors.primaryGreen,
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  reportEmptyText: {
+    color: AppColors.gray,
+    fontSize: 12,
+  },
+  reportSummaryContainer: {
+    backgroundColor: "rgba(63, 221, 144, 0.08)",
+    borderRadius: 16,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: "rgba(63, 221, 144, 0.22)",
+    gap: 12,
+  },
+  reportSummarySection: {
+    gap: 6,
+  },
+  reportSummaryDivider: {
+    height: 1,
+    backgroundColor: "rgba(63, 221, 144, 0.18)",
+  },
+  reportParagraphGroup: {
+    gap: 6,
+  },
+  reportSummaryTitle: {
+    color: AppColors.primaryGreen,
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  reportSummaryText: {
+    color: AppColors.white,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  providerToggleGroup: {
+    gap: 10,
+  },
+  providerTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  providerAvatar: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.15)",
+    backgroundColor: AppColors.white,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  providerToggleCard: {
+    borderWidth: 1,
+    borderColor: "rgba(63, 221, 144, 0.3)",
+    borderRadius: 12,
+    padding: 12,
+    backgroundColor: "rgba(0, 0, 0, 0.6)",
+  },
+  providerToggleHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  providerToggleTitle: {
+    color: AppColors.white,
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  providerToggleAction: {
+    color: AppColors.primaryGreen,
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  providerToggleBody: {
+    marginTop: 8,
+    gap: 6,
+  },
+  providerDetailText: {
+    color: AppColors.lightGray,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  reportActionArea: {
+    marginHorizontal: 16,
+    marginBottom: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  top3ButtonContainer: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  reportActionButton: {
+    flex: 1,
+    height: 52,
+    borderRadius: 12,
+    backgroundColor: AppColors.primaryGreen,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  infoButton: {
+    width: 44,
+    height: 52,
+    borderRadius: 12,
+    backgroundColor: "rgba(63, 221, 144, 0.2)",
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "rgba(63, 221, 144, 0.5)",
+  },
+  infoButtonText: {
+    color: AppColors.primaryGreen,
+    fontSize: 18,
+    fontWeight: "900",
+  },
+  reportActionText: {
+    color: AppColors.black,
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  reportActionDivider: {
+    display: "none",
   },
   optionButton: {
     backgroundColor: "transparent",
     borderWidth: 1,
     borderColor: AppColors.primaryGreen,
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    borderRadius: 18,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
     shadowColor: AppColors.primaryGreen,
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.3,
@@ -1125,7 +2179,7 @@ const styles = StyleSheet.create({
   },
   optionButtonText: {
     color: AppColors.primaryGreen,
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: "500",
   },
   modalOverlay: {
@@ -1182,5 +2236,65 @@ const styles = StyleSheet.create({
     color: AppColors.white,
     fontSize: 14,
   },
+  top3ModalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.8)",
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 20,
+  },
+  top3ModalContent: {
+    width: "100%",
+    backgroundColor: "#141414",
+    borderRadius: 16,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: "rgba(63, 221, 144, 0.3)",
+    gap: 16,
+  },
+  top3ModalTitle: {
+    color: AppColors.white,
+    fontSize: 18,
+    fontWeight: "700",
+    textAlign: "center",
+  },
+  top3ModalSubtitle: {
+    color: AppColors.primaryGreen,
+    fontSize: 14,
+    fontWeight: "600",
+    textAlign: "center",
+  },
+  top3ModalImagePlaceholder: {
+    width: "100%",
+    height: 180,
+    borderRadius: 12,
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    overflow: "hidden",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  top3ModalImage: {
+    width: "100%",
+    height: "100%",
+    resizeMode: "cover",
+  },
+  top3ModalBody: {
+    color: AppColors.lightGray,
+    fontSize: 13,
+    lineHeight: 20,
+    textAlign: "center",
+  },
+  top3ModalClose: {
+    height: 48,
+    borderRadius: 10,
+    backgroundColor: AppColors.primaryGreen,
+    justifyContent: "center",
+    alignItems: "center",
+    marginTop: 8,
+  },
+  top3ModalCloseText: {
+    color: AppColors.black,
+    fontSize: 15,
+    fontWeight: "700",
+  },
 });
-

@@ -1,4 +1,4 @@
-import { API_ENDPOINTS } from "@/constants/api";
+﻿import { API_ENDPOINTS } from "@/constants/api";
 import { KeyboardAwareScreen } from "@/components/keyboard-aware-screen";
 import { AppColors } from "@/constants/theme";
 import { clearAuthTokens } from "@/lib/auth-storage";
@@ -222,23 +222,25 @@ export default function ProfileScreen() {
             </Text>
           </TouchableOpacity>
 
-          <TouchableOpacity
-            style={styles.secondaryButton}
-            onPress={handleLogout}
-            disabled={isSaving || isWithdrawing}
-          >
-            <Text style={styles.secondaryButtonText}>로그아웃</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.withdrawButton, isWithdrawing && styles.disabledButton]}
-            onPress={confirmWithdraw}
-            disabled={isSaving || isWithdrawing}
-          >
-            <Text style={styles.withdrawButtonText}>
-              {isWithdrawing ? "탈퇴 처리 중..." : "회원탈퇴"}
-            </Text>
-          </TouchableOpacity>
+          <View style={styles.actionRow}>
+            <TouchableOpacity
+              style={styles.actionTextButton}
+              onPress={confirmWithdraw}
+              disabled={isSaving || isWithdrawing}
+            >
+              <Text style={styles.withdrawButtonText}>
+                {isWithdrawing ? "탈퇴 처리 중..." : "회원탈퇴"}
+              </Text>
+            </TouchableOpacity>
+            <Text style={styles.actionDivider}>|</Text>
+            <TouchableOpacity
+              style={styles.actionTextButton}
+              onPress={handleLogout}
+              disabled={isSaving || isWithdrawing}
+            >
+              <Text style={styles.secondaryButtonText}>로그아웃</Text>
+            </TouchableOpacity>
+          </View>
         </KeyboardAwareScreen>
       </View>
     </SafeAreaView>
@@ -278,7 +280,7 @@ const styles = StyleSheet.create({
   },
   content: {
     paddingHorizontal: 24,
-    paddingBottom: 40,
+    paddingBottom: 20,
   },
   avatar: {
     width: 104,
@@ -290,7 +292,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     alignSelf: "center",
     marginTop: 12,
-    marginBottom: 28,
+    marginBottom: 20,
   },
   avatarText: {
     color: AppColors.white,
@@ -298,7 +300,7 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   fieldGroup: {
-    marginBottom: 18,
+    marginBottom: 12,
   },
   label: {
     color: AppColors.white,
@@ -307,7 +309,7 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   input: {
-    height: 50,
+    height: 46,
     borderWidth: 1,
     borderColor: AppColors.gray,
     borderRadius: 8,
@@ -320,47 +322,47 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   primaryButton: {
-    height: 52,
+    height: 48,
     borderRadius: 8,
     backgroundColor: AppColors.primaryGreen,
     justifyContent: "center",
     alignItems: "center",
-    marginTop: 8,
-    marginBottom: 12,
+    marginTop: 6,
+    marginBottom: 22,
   },
   primaryButtonText: {
     color: AppColors.black,
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: "700",
-  },
-  secondaryButton: {
-    height: 52,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: AppColors.white,
-    justifyContent: "center",
-    alignItems: "center",
-    marginBottom: 12,
   },
   secondaryButtonText: {
     color: AppColors.white,
-    fontSize: 15,
+    fontSize: 13,
     fontWeight: "600",
-  },
-  withdrawButton: {
-    height: 52,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "#B55454",
-    justifyContent: "center",
-    alignItems: "center",
   },
   withdrawButtonText: {
     color: "#F07C7C",
-    fontSize: 15,
+    fontSize: 13,
     fontWeight: "600",
+    opacity: 0.7,
   },
   disabledButton: {
     opacity: 0.6,
+  },
+  actionRow: {
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    marginTop: 12,
+    marginBottom: 8,
+  },
+  actionTextButton: {
+    paddingHorizontal: 6,
+    paddingVertical: 6,
+  },
+  actionDivider: {
+    color: AppColors.gray,
+    fontSize: 13,
+    marginHorizontal: 28,
   },
 });
