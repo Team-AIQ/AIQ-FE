@@ -180,6 +180,119 @@ function normalizeCurationResponse(
   };
 }
 
+type RawFinalReportPayload = Record<string, unknown>;
+
+function normalizeTopProduct(value: unknown): TopProduct | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+
+  const rankRaw = record.rank ?? record.order ?? record.priority;
+  const rank =
+    typeof rankRaw === "number"
+      ? rankRaw
+      : typeof rankRaw === "string"
+        ? Number(rankRaw)
+        : 0;
+
+  const specsRaw =
+    (record.specs as unknown) ??
+    (record.specifications as unknown) ??
+    (record.spec_map as unknown) ??
+    (record.specs_map as unknown);
+
+  const specs =
+    specsRaw && typeof specsRaw === "object" && !Array.isArray(specsRaw)
+      ? (specsRaw as Record<string, string>)
+      : ({} as Record<string, string>);
+
+  return {
+    rank: Number.isFinite(rank) ? rank : 0,
+    productName:
+      (record.productName as string | undefined) ??
+      (record.product_name as string | undefined) ??
+      (record.name as string | undefined) ??
+      "",
+    productCode:
+      (record.productCode as string | undefined) ??
+      (record.product_code as string | undefined) ??
+      (record.code as string | undefined) ??
+      "",
+    price: (record.price as string | undefined) ?? "",
+    productImage:
+      (record.productImage as string | undefined) ??
+      (record.product_image as string | undefined) ??
+      (record.image as string | undefined) ??
+      "",
+    specs,
+    lowestPriceLink:
+      (record.lowestPriceLink as string | undefined) ??
+      (record.lowest_price_link as string | undefined) ??
+      (record.lowestPriceUrl as string | undefined) ??
+      (record.lowest_price_url as string | undefined) ??
+      (record.link as string | undefined) ??
+      "",
+    comparativeAnalysis:
+      (record.comparativeAnalysis as string | undefined) ??
+      (record.comparative_analysis as string | undefined) ??
+      (record.analysis as string | undefined) ??
+      "",
+  };
+}
+
+function normalizeFinalReportResponse(
+  raw: RawFinalReportPayload | unknown,
+): FinalReportResponse | null {
+  const payload = extractPayload(raw);
+  if (!payload) return null;
+
+  const topProductsRaw =
+    (payload.topProducts as unknown) ??
+    (payload.top_products as unknown) ??
+    (payload.products as unknown) ??
+    [];
+  const topProducts = Array.isArray(topProductsRaw)
+    ? topProductsRaw.map(normalizeTopProduct).filter(Boolean)
+    : [];
+
+  const consensus =
+    (payload.consensus as string | undefined) ??
+    (payload.aiConsensus as string | undefined) ??
+    (payload.ai_consensus as string | undefined) ??
+    "";
+  const decisionBranches =
+    (payload.decisionBranches as string | undefined) ??
+    (payload.decision_branches as string | undefined) ??
+    (payload.modelDecisionBranches as string | undefined) ??
+    "";
+  const aiqRecommendationReason =
+    (payload.aiqRecommendationReason as string | undefined) ??
+    (payload.aiq_recommendation_reason as string | undefined) ??
+    (payload.recommendationReason as string | undefined) ??
+    "";
+  const finalWord =
+    (payload.finalWord as string | undefined) ??
+    (payload.final_word as string | undefined) ??
+    "";
+
+  if (
+    !consensus &&
+    !decisionBranches &&
+    !aiqRecommendationReason &&
+    topProducts.length === 0 &&
+    !finalWord
+  ) {
+    return null;
+  }
+
+  return {
+    consensus,
+    decisionBranches,
+    aiqRecommendationReason,
+    topProducts: topProducts as TopProduct[],
+    finalWord,
+  };
+}
+
 export default function HomeScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{
@@ -227,6 +340,8 @@ export default function HomeScreen() {
   const [reportActionHeight, setReportActionHeight] = useState(0);
   const [showTop3Info, setShowTop3Info] = useState(false);
   const [isHistoryReport, setIsHistoryReport] = useState(false);
+  const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
+  const [isInputFocused, setIsInputFocused] = useState(false);
   const flatListRef = useRef<FlatList>(null);
   const glowAnim = useRef(new Animated.Value(0.5)).current;
   const floatAnim = useRef(new Animated.Value(0)).current;
@@ -362,11 +477,11 @@ export default function HomeScreen() {
 
     const keyboardShowListener = Keyboard.addListener(
       showEvent,
-      () => undefined,
+      () => setIsKeyboardVisible(true),
     );
     const keyboardHideListener = Keyboard.addListener(
       hideEvent,
-      () => undefined,
+      () => setIsKeyboardVisible(false),
     );
 
     return () => {
@@ -473,6 +588,7 @@ export default function HomeScreen() {
     setAiResponses({});
     setShowTop3(false);
     setActiveReport(null);
+    setIsHistoryReport(false);
     if (sseRef.current) {
       sseRef.current.close?.();
       sseRef.current = null;
@@ -553,7 +669,11 @@ export default function HomeScreen() {
 
   const handleFinalReport = (payload: string) => {
     try {
-      const report = JSON.parse(payload) as FinalReportResponse;
+      const parsed = JSON.parse(payload) as unknown;
+      const report = normalizeFinalReportResponse(parsed);
+      if (!report) {
+        throw new Error("Invalid report payload");
+      }
       setAnalysisStatus((prev) => {
         const next = { ...prev };
         Object.keys(next).forEach((key) => {
@@ -578,16 +698,23 @@ export default function HomeScreen() {
     const maxAttempts = 30;
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
       try {
-        const response = await apiRequest<ApiResponse<FinalReportResponse>>(
+        const response = await apiRequest<ApiResponse<unknown>>(
           `${API_ENDPOINTS.CURATION_REPORT}/${queryId}/report`,
           {
             method: "GET",
             requireAuth: true,
           },
         );
-        const data = unwrapApiResponse<FinalReportResponse>(response);
-        if (data) {
-          handleFinalReport(JSON.stringify(data));
+        const data = unwrapApiResponse<unknown>(response);
+        const report = normalizeFinalReportResponse(data);
+        if (report) {
+          appendReportMessage(report);
+          setIsReportGenerating(false);
+          setPendingQuestions(null);
+          setPendingQueryId(null);
+          setIsHistoryReport(false);
+          refreshHistory();
+          scrollToBottom();
           return;
         }
       } catch {
@@ -920,7 +1047,10 @@ export default function HomeScreen() {
     await askNextQuestion(option);
   };
 
-  const dismissKeyboard = () => Keyboard.dismiss();
+  const dismissKeyboard = () => {
+    setIsInputFocused(false);
+    Keyboard.dismiss();
+  };
 
   const handleToggleProvider = async (
     key: keyof AIProviderSettings,
@@ -966,14 +1096,15 @@ export default function HomeScreen() {
   const handleSelectHistory = async (item: HistoryResponseItem) => {
     setIsMenuOpen(false);
     try {
-      const response = await apiRequest<ApiResponse<FinalReportResponse>>(
+      const response = await apiRequest<ApiResponse<unknown>>(
         `${API_ENDPOINTS.CURATION_REPORT}/${item.queryId}/report`,
         {
           method: "GET",
           requireAuth: true,
         },
       );
-      const report = unwrapApiResponse<FinalReportResponse>(response);
+      const raw = unwrapApiResponse<unknown>(response);
+      const report = normalizeFinalReportResponse(raw);
       if (!report) {
         Alert.alert("안내", "리포트를 생성하지 않았습니다.");
         return;
@@ -1063,7 +1194,7 @@ export default function HomeScreen() {
             <Text style={styles.reportLoadingTitle}>
               최적의 답변을 생성하고 있습니다
             </Text>
-            <View style={styles.loadingDots}>
+            <View style={[styles.loadingDots, styles.reportLoadingDots]}>
               {[0, 1, 2, 3, 4].map((index) => (
                 <Animated.View
                   key={`report-dot-${index}`}
@@ -1086,13 +1217,48 @@ export default function HomeScreen() {
                     : status === "error"
                       ? "오류"
                       : "분석 중...";
+                const statusTone =
+                  status === "complete"
+                    ? "complete"
+                    : status === "error"
+                      ? "error"
+                      : "analyzing";
                 return (
                   <View key={model} style={styles.providerStatusRow}>
                     <View style={styles.providerStatusLeft}>
-                      <View style={styles.providerStatusBullet} />
-                      <Text style={styles.providerStatusLabel}>{label}</Text>
+                      <View
+                        style={[
+                          styles.providerStatusBullet,
+                          statusTone === "analyzing"
+                            ? styles.providerStatusBulletAnalyzing
+                            : null,
+                          statusTone === "error"
+                            ? styles.providerStatusBulletError
+                            : null,
+                        ]}
+                      />
+                      <Text
+                        style={[
+                          styles.providerStatusLabel,
+                          statusTone === "analyzing"
+                            ? styles.providerStatusTextAnalyzing
+                            : null,
+                        ]}
+                      >
+                        {label}
+                      </Text>
                     </View>
-                    <Text style={styles.providerStatusValue}>
+                    <Text
+                      style={[
+                        styles.providerStatusValue,
+                        statusTone === "analyzing"
+                          ? styles.providerStatusTextAnalyzing
+                          : null,
+                        statusTone === "error"
+                          ? styles.providerStatusTextError
+                          : null,
+                      ]}
+                    >
                       {statusLabel}
                     </Text>
                   </View>
@@ -1189,18 +1355,6 @@ export default function HomeScreen() {
                   {renderParagraphs(item.reportData.aiqRecommendationReason)}
                 </View>
               </View>
-
-              {item.reportData.finalWord ? (
-                <>
-                  <View style={styles.reportSummaryDivider} />
-                  <View style={styles.reportSummarySection}>
-                    <Text style={styles.reportSummaryTitle}>마지막 한마디</Text>
-                    <View style={styles.reportParagraphGroup}>
-                      {renderParagraphs(item.reportData.finalWord)}
-                    </View>
-                  </View>
-                </>
-              ) : null}
             </View>
 
             <Text style={styles.reportSectionTitle}>AI 답변 보기</Text>
@@ -1468,15 +1622,11 @@ export default function HomeScreen() {
                   ) : null}
                   <TouchableOpacity
                     style={styles.reportActionButton}
-                    onPress={() => {
-                      refreshHistory();
+                    onPress={async () => {
+                      await refreshHistory();
                       Alert.alert("완료", "리포트를 히스토리에 저장했습니다.");
-                      setActiveReport(null);
-                      setShowTop3(false);
-                      setIsHistoryReport(false);
-                      setTimeout(() => {
-                        flatListRef.current?.scrollToEnd({ animated: true });
-                      }, 150);
+                      resetConversation();
+                      router.replace("/(tabs)/index");
                     }}
                   >
                     <Text style={styles.reportActionText}>완료하기</Text>
@@ -1490,7 +1640,7 @@ export default function HomeScreen() {
             </Pressable>
           )}
 
-          {messages.length === 0 ? (
+          {messages.length === 0 && !isKeyboardVisible && !isInputFocused ? (
             <Animated.View
               style={[
                 styles.tooltipContainer,
@@ -1561,6 +1711,8 @@ export default function HomeScreen() {
                 value={inputText}
                 onChangeText={setInputText}
                 onSubmitEditing={handleSend}
+                onFocus={() => setIsInputFocused(true)}
+                onBlur={() => setIsInputFocused(false)}
                 multiline
                 maxLength={500}
                 editable={!isReportGenerating && !isLoading && !activeReport}
@@ -1938,6 +2090,11 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "700",
     marginBottom: 10,
+    textAlign: "center",
+  },
+  reportLoadingDots: {
+    alignSelf: "center",
+    justifyContent: "center",
   },
   providerStatusList: {
     marginTop: 8,
@@ -1959,6 +2116,12 @@ const styles = StyleSheet.create({
     borderRadius: 3,
     backgroundColor: AppColors.primaryGreen,
   },
+  providerStatusBulletAnalyzing: {
+    backgroundColor: AppColors.gray,
+  },
+  providerStatusBulletError: {
+    backgroundColor: AppColors.error,
+  },
   providerStatusLabel: {
     color: AppColors.primaryGreen,
     fontSize: 12,
@@ -1966,6 +2129,12 @@ const styles = StyleSheet.create({
   providerStatusValue: {
     color: "rgba(63, 221, 144, 0.7)",
     fontSize: 12,
+  },
+  providerStatusTextAnalyzing: {
+    color: AppColors.gray,
+  },
+  providerStatusTextError: {
+    color: AppColors.error,
   },
   reportCard: {
     width: "100%",

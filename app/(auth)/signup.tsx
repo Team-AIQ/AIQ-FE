@@ -4,10 +4,14 @@ import { API_ENDPOINTS } from "@/constants/api";
 import { PRIVACY_POLICY } from "@/constants/legal";
 import { AppColors } from "@/constants/theme";
 import { apiRequest, isApiError } from "@/lib/api-client";
-import { saveUserProfile, setCredits, setPendingOnboarding } from "@/lib/user-session";
-import { useLocalSearchParams, useRouter } from "expo-router";
-import * as Linking from "expo-linking";
+import {
+  saveUserProfile,
+  setCredits,
+  setPendingOnboarding,
+} from "@/lib/user-session";
 import Constants from "expo-constants";
+import * as Linking from "expo-linking";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useEffect, useState } from "react";
 import {
@@ -45,7 +49,10 @@ export default function SignupScreen() {
   const [emailStatusMessage, setEmailStatusMessage] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [legalOpen, setLegalOpen] = useState(false);
-  const searchParams = useLocalSearchParams<{ email?: string; verified?: string }>();
+  const searchParams = useLocalSearchParams<{
+    email?: string;
+    verified?: string;
+  }>();
 
   const isValidEmail = /\S+@\S+\.\S+/.test(email);
   const originParam = Constants.appOwnership === "expo" ? "expo" : "app";
@@ -235,207 +242,207 @@ export default function SignupScreen() {
           />
         </TouchableOpacity>
 
-          <View style={styles.profileImageContainer}>
-            <View style={styles.profileImageCircle}>
-              <Image
-                source={require("../../assets/images/hello-pickle.png")}
-                style={styles.profileImage}
-                resizeMode="contain"
-              />
-            </View>
-          </View>
-
-          <View style={styles.inputContainer}>
-            <Text style={styles.label}>이메일</Text>
-            <View style={styles.inputWithButton}>
-              <TextInput
-                style={[
-                  styles.input,
-                  styles.inputWithButtonField,
-                  emailError ? styles.inputError : null,
-                  emailStatus === "verified" ? styles.verifiedInput : null,
-                ]}
-                placeholder="ex. aiq@email.com"
-                placeholderTextColor={AppColors.gray}
-                value={email}
-                onChangeText={(value) => {
-                  setEmail(value);
-                  setEmailError("");
-                  setEmailStatus("idle");
-                  setEmailStatusMessage("");
-                }}
-                keyboardType="email-address"
-                autoCapitalize="none"
-                autoComplete="email"
-              />
-              <TouchableOpacity
-                style={[
-                  styles.inputButton,
-                  isValidEmail ? styles.inputButtonActive : null,
-                ]}
-                disabled={!isValidEmail || emailStatus === "sending"}
-                onPress={handleSendVerification}
-              >
-                <Text style={styles.inputButtonText}>
-                  {emailStatus === "sending" ? "발송 중" : "중복확인"}
-                </Text>
-              </TouchableOpacity>
-            </View>
-            {emailError ? (
-              <Text style={styles.errorText}>{emailError}</Text>
-            ) : null}
-            {emailStatusMessage ? (
-              <Text
-                style={[
-                  styles.statusText,
-                  emailStatus === "verified"
-                    ? styles.statusTextSuccess
-                    : undefined,
-                ]}
-              >
-                {emailStatusMessage}
-              </Text>
-            ) : null}
-            {emailStatus === "sent" ? (
-              <TouchableOpacity
-                style={styles.verifyButton}
-                onPress={handleConfirmVerification}
-              >
-                <Text style={styles.verifyButtonText}>인증 확인</Text>
-              </TouchableOpacity>
-            ) : null}
-          </View>
-
-          <View style={styles.inputContainer}>
-            <Text style={styles.label}>닉네임</Text>
-            <TextInput
-              style={[styles.input, nicknameError ? styles.inputError : null]}
-              placeholder="최초 1회 설정 후 변경 불가"
-              placeholderTextColor={AppColors.gray}
-              value={nickname}
-              onChangeText={(value) => {
-                setNickname(value);
-                setNicknameError("");
-              }}
+        <View style={styles.profileImageContainer}>
+          <View style={styles.profileImageCircle}>
+            <Image
+              source={require("../../assets/images/hello-pickle.png")}
+              style={styles.profileImage}
+              resizeMode="contain"
             />
-            {nicknameError ? (
-              <Text style={styles.errorText}>{nicknameError}</Text>
-            ) : null}
           </View>
+        </View>
 
-          <View style={styles.inputContainer}>
-            <Text style={styles.label}>비밀번호</Text>
-            <View style={styles.passwordContainer}>
-              <TextInput
-                style={[
-                  styles.input,
-                  styles.passwordInput,
-                  passwordError ? styles.inputError : null,
-                ]}
-                placeholder="영문, 숫자, 특수문자를 포함한 8~16자"
-                placeholderTextColor={AppColors.gray}
-                value={password}
-                onChangeText={(value) => {
-                  setPassword(value);
-                  setPasswordError("");
-                }}
-                onBlur={handlePasswordBlur}
-                secureTextEntry={!showPassword}
-                autoCapitalize="none"
-              />
-              <TouchableOpacity
-                style={styles.eyeIcon}
-                onPress={() => setShowPassword((prev) => !prev)}
-              >
-                <Image
-                  source={
-                    showPassword
-                      ? require("../../assets/images/password-open.png")
-                      : require("../../assets/images/password-hide.png")
-                  }
-                  style={styles.eyeIconImage}
-                />
-              </TouchableOpacity>
-            </View>
-            {passwordError ? (
-              <Text style={styles.errorText}>{passwordError}</Text>
-            ) : null}
-          </View>
-
-          <View style={styles.inputContainer}>
-            <Text style={styles.label}>비밀번호 확인</Text>
-            <View style={styles.passwordContainer}>
-              <TextInput
-                style={[
-                  styles.input,
-                  styles.passwordInput,
-                  passwordConfirmError ? styles.inputError : null,
-                ]}
-                placeholder="비밀번호를 한번 더 입력해 주세요."
-                placeholderTextColor={AppColors.gray}
-                value={passwordConfirm}
-                onChangeText={(value) => {
-                  setPasswordConfirm(value);
-                  setPasswordConfirmError("");
-                }}
-                onBlur={handlePasswordConfirmBlur}
-                secureTextEntry={!showPasswordConfirm}
-                autoCapitalize="none"
-              />
-              <TouchableOpacity
-                style={styles.eyeIcon}
-                onPress={() => setShowPasswordConfirm((prev) => !prev)}
-              >
-                <Image
-                  source={
-                    showPasswordConfirm
-                      ? require("../../assets/images/password-open.png")
-                      : require("../../assets/images/password-hide.png")
-                  }
-                  style={styles.eyeIconImage}
-                />
-              </TouchableOpacity>
-            </View>
-            {passwordConfirmError ? (
-              <Text style={styles.errorText}>{passwordConfirmError}</Text>
-            ) : null}
-          </View>
-
-          <TouchableOpacity
-            style={styles.checkboxContainer}
-            onPress={() => setLegalOpen(true)}
-          >
-            <View
+        <View style={styles.inputContainer}>
+          <Text style={styles.label}>이메일</Text>
+          <View style={styles.inputWithButton}>
+            <TextInput
               style={[
-                styles.checkbox,
-                agreeTerms ? styles.checkboxChecked : null,
+                styles.input,
+                styles.inputWithButtonField,
+                emailError ? styles.inputError : null,
+                emailStatus === "verified" ? styles.verifiedInput : null,
+              ]}
+              placeholder="ex. aiq@email.com"
+              placeholderTextColor={AppColors.gray}
+              value={email}
+              onChangeText={(value) => {
+                setEmail(value);
+                setEmailError("");
+                setEmailStatus("idle");
+                setEmailStatusMessage("");
+              }}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoComplete="email"
+            />
+            <TouchableOpacity
+              style={[
+                styles.inputButton,
+                isValidEmail ? styles.inputButtonActive : null,
+              ]}
+              disabled={!isValidEmail || emailStatus === "sending"}
+              onPress={handleSendVerification}
+            >
+              <Text style={styles.inputButtonText}>
+                {emailStatus === "sending" ? "발송 중" : "중복확인"}
+              </Text>
+            </TouchableOpacity>
+          </View>
+          {emailError ? (
+            <Text style={styles.errorText}>{emailError}</Text>
+          ) : null}
+          {emailStatusMessage ? (
+            <Text
+              style={[
+                styles.statusText,
+                emailStatus === "verified"
+                  ? styles.statusTextSuccess
+                  : undefined,
               ]}
             >
-              {agreeTerms ? <Text style={styles.checkmark}>✓</Text> : null}
-            </View>
-            <Text style={styles.checkboxLabel}>개인정보 이용에 동의합니다</Text>
+              {emailStatusMessage}
+            </Text>
+          ) : null}
+          {emailStatus === "sent" ? (
             <TouchableOpacity
-              style={styles.detailButton}
-              onPress={() => setLegalOpen(true)}
+              style={styles.verifyButton}
+              onPress={handleConfirmVerification}
             >
-              <Text style={styles.detailButtonText}>보기</Text>
+              <Text style={styles.verifyButtonText}>인증 확인</Text>
             </TouchableOpacity>
-          </TouchableOpacity>
+          ) : null}
+        </View>
 
-          <TouchableOpacity
+        <View style={styles.inputContainer}>
+          <Text style={styles.label}>닉네임</Text>
+          <TextInput
+            style={[styles.input, nicknameError ? styles.inputError : null]}
+            placeholder="최초 1회 설정 후 변경 불가"
+            placeholderTextColor={AppColors.gray}
+            value={nickname}
+            onChangeText={(value) => {
+              setNickname(value);
+              setNicknameError("");
+            }}
+          />
+          {nicknameError ? (
+            <Text style={styles.errorText}>{nicknameError}</Text>
+          ) : null}
+        </View>
+
+        <View style={styles.inputContainer}>
+          <Text style={styles.label}>비밀번호</Text>
+          <View style={styles.passwordContainer}>
+            <TextInput
+              style={[
+                styles.input,
+                styles.passwordInput,
+                passwordError ? styles.inputError : null,
+              ]}
+              placeholder="영문, 숫자, 특수문자를 포함한 8~16자"
+              placeholderTextColor={AppColors.gray}
+              value={password}
+              onChangeText={(value) => {
+                setPassword(value);
+                setPasswordError("");
+              }}
+              onBlur={handlePasswordBlur}
+              secureTextEntry={!showPassword}
+              autoCapitalize="none"
+            />
+            <TouchableOpacity
+              style={styles.eyeIcon}
+              onPress={() => setShowPassword((prev) => !prev)}
+            >
+              <Image
+                source={
+                  showPassword
+                    ? require("../../assets/images/password-open.png")
+                    : require("../../assets/images/password-hide.png")
+                }
+                style={styles.eyeIconImage}
+              />
+            </TouchableOpacity>
+          </View>
+          {passwordError ? (
+            <Text style={styles.errorText}>{passwordError}</Text>
+          ) : null}
+        </View>
+
+        <View style={styles.inputContainer}>
+          <Text style={styles.label}>비밀번호 확인</Text>
+          <View style={styles.passwordContainer}>
+            <TextInput
+              style={[
+                styles.input,
+                styles.passwordInput,
+                passwordConfirmError ? styles.inputError : null,
+              ]}
+              placeholder="비밀번호를 한번 더 입력해 주세요."
+              placeholderTextColor={AppColors.gray}
+              value={passwordConfirm}
+              onChangeText={(value) => {
+                setPasswordConfirm(value);
+                setPasswordConfirmError("");
+              }}
+              onBlur={handlePasswordConfirmBlur}
+              secureTextEntry={!showPasswordConfirm}
+              autoCapitalize="none"
+            />
+            <TouchableOpacity
+              style={styles.eyeIcon}
+              onPress={() => setShowPasswordConfirm((prev) => !prev)}
+            >
+              <Image
+                source={
+                  showPasswordConfirm
+                    ? require("../../assets/images/password-open.png")
+                    : require("../../assets/images/password-hide.png")
+                }
+                style={styles.eyeIconImage}
+              />
+            </TouchableOpacity>
+          </View>
+          {passwordConfirmError ? (
+            <Text style={styles.errorText}>{passwordConfirmError}</Text>
+          ) : null}
+        </View>
+
+        <TouchableOpacity
+          style={styles.checkboxContainer}
+          onPress={() => setLegalOpen(true)}
+        >
+          <View
             style={[
-              styles.signupButton,
-              isFormValid && !isLoading ? styles.signupButtonActive : null,
+              styles.checkbox,
+              agreeTerms ? styles.checkboxChecked : null,
             ]}
-            onPress={handleSignup}
-            disabled={!isFormValid || isLoading}
           >
-            {isLoading ? (
-              <ActivityIndicator color={AppColors.white} />
-            ) : (
-              <Text style={styles.signupButtonText}>회원가입</Text>
-            )}
+            {agreeTerms ? <Text style={styles.checkmark}>✓</Text> : null}
+          </View>
+          <Text style={styles.checkboxLabel}>개인정보 이용에 동의합니다</Text>
+          <TouchableOpacity
+            style={styles.detailButton}
+            onPress={() => setLegalOpen(true)}
+          >
+            <Text style={styles.detailButtonText}>보기</Text>
           </TouchableOpacity>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[
+            styles.signupButton,
+            isFormValid && !isLoading ? styles.signupButtonActive : null,
+          ]}
+          onPress={handleSignup}
+          disabled={!isFormValid || isLoading}
+        >
+          {isLoading ? (
+            <ActivityIndicator color={AppColors.white} />
+          ) : (
+            <Text style={styles.signupButtonText}>회원가입</Text>
+          )}
+        </TouchableOpacity>
       </KeyboardAwareScreen>
 
       <LegalModal
@@ -639,7 +646,7 @@ const styles = StyleSheet.create({
     paddingLeft: 8,
   },
   detailButtonText: {
-    color: AppColors.primaryGreen,
+    color: AppColors.white,
     fontSize: 13,
     textDecorationLine: "underline",
   },
@@ -661,7 +668,3 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
 });
-
-
-
-

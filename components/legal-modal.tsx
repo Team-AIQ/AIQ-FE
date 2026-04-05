@@ -1,7 +1,8 @@
 import { AppColors } from "@/constants/theme";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Dimensions,
+  Linking,
   Modal,
   Pressable,
   ScrollView,
@@ -22,8 +23,43 @@ type LegalModalProps = {
 const { height } = Dimensions.get("window");
 const IS_SMALL = height < 740;
 
+const URL_PATTERN = /(https?:\/\/[^\s]+)/g;
+
 function isSectionHeader(line: string) {
-  return /^\d+\./.test(line) || /^제\d+조/.test(line);
+  return /^\d+\./.test(line.trim());
+}
+
+function isQuestionLine(line: string) {
+  return /^Q\d+\./i.test(line.trim());
+}
+
+function renderLineWithLinks(line: string, style: any, key: string) {
+  const parts = line.split(URL_PATTERN).filter(Boolean);
+  if (parts.length <= 1) {
+    return (
+      <Text key={key} allowFontScaling={false} style={style}>
+        {line}
+      </Text>
+    );
+  }
+
+  return (
+    <Text key={key} allowFontScaling={false} style={style}>
+      {parts.map((part, index) => {
+        const isUrl = part.startsWith("http://") || part.startsWith("https://");
+        if (!isUrl) return <Text key={`${key}-t-${index}`}>{part}</Text>;
+        return (
+          <Text
+            key={`${key}-u-${index}`}
+            style={styles.link}
+            onPress={() => Linking.openURL(part)}
+          >
+            {part}
+          </Text>
+        );
+      })}
+    </Text>
+  );
 }
 
 function renderDescription(description: string) {
@@ -35,6 +71,16 @@ function renderDescription(description: string) {
       const [firstLine, ...restLines] = lines;
       const section = isSectionHeader(firstLine);
 
+      const renderLine = (line: string, lineIndex: number) => {
+        const bullet = line.trim().startsWith("- ");
+        const question = isQuestionLine(line);
+        const style = [
+          bullet ? styles.bullet : styles.paragraph,
+          question ? styles.question : null,
+        ];
+        return renderLineWithLinks(line, style, `${line}-${lineIndex}-${index}`);
+      };
+
       return (
         <View key={`${firstLine}-${index}`} style={styles.section}>
           {section ? (
@@ -43,32 +89,10 @@ function renderDescription(description: string) {
                 {firstLine}
               </Text>
               <View style={styles.divider} />
-              {restLines.map((line, lineIndex) => {
-                const bullet = line.trim().startsWith("- ");
-                return (
-                  <Text
-                    key={`${line}-${lineIndex}`}
-                    allowFontScaling={false}
-                    style={bullet ? styles.bullet : styles.paragraph}
-                  >
-                    {line}
-                  </Text>
-                );
-              })}
+              {restLines.map(renderLine)}
             </>
           ) : (
-            lines.map((line, lineIndex) => {
-              const bullet = line.trim().startsWith("- ");
-              return (
-                <Text
-                  key={`${line}-${lineIndex}`}
-                  allowFontScaling={false}
-                  style={bullet ? styles.bullet : styles.paragraph}
-                >
-                  {line}
-                </Text>
-              );
-            })
+            lines.map(renderLine)
           )}
         </View>
       );
@@ -120,13 +144,10 @@ export function LegalModal({
     }
   };
 
+  const rendered = useMemo(() => renderDescription(description), [description]);
+
   return (
-    <Modal
-      animationType="fade"
-      onRequestClose={onClose}
-      transparent
-      visible={open}
-    >
+    <Modal animationType="fade" onRequestClose={onClose} transparent visible={open}>
       <View style={styles.overlay}>
         <Pressable style={styles.backdrop} onPress={onClose} />
         <View style={styles.card}>
@@ -146,11 +167,11 @@ export function LegalModal({
             contentContainerStyle={styles.content}
             showsVerticalScrollIndicator
             onScroll={handleScroll}
-            onContentSizeChange={(_, height) => setContentHeight(height)}
+            onContentSizeChange={(_, nextHeight) => setContentHeight(nextHeight)}
             onLayout={(event) => setLayoutHeight(event.nativeEvent.layout.height)}
             scrollEventThrottle={16}
           >
-            {renderDescription(description)}
+            {rendered}
           </ScrollView>
 
           {onAgree && canAgree ? (
@@ -288,4 +309,14 @@ const styles = StyleSheet.create({
     paddingLeft: 6,
     marginBottom: 6,
   },
+  question: {
+    color: AppColors.primaryGreen,
+    fontWeight: "800",
+  },
+  link: {
+    color: AppColors.primaryGreen,
+    textDecorationLine: "underline",
+    fontWeight: "700",
+  },
 });
+

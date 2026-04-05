@@ -35,10 +35,7 @@ function getErrorMessage(status: number, payload: unknown, fallback: string) {
   if (payload && typeof payload === "object") {
     const record = payload as Record<string, unknown>;
     const message =
-      record.message ??
-      record.error ??
-      record.detail ??
-      record.title;
+      record.message ?? record.error ?? record.detail ?? record.title;
 
     if (typeof message === "string" && message.trim()) {
       return message;
@@ -90,8 +87,13 @@ export async function apiRequest<T>(
       signal: controller.signal,
     });
   } catch (error) {
+    console.error("[API] fetch error", { url, error });
     if (error instanceof DOMException && error.name === "AbortError") {
-      throw new ApiError(`Request timed out after ${timeoutMs}ms (${url}).`, 0, error);
+      throw new ApiError(
+        `Request timed out after ${timeoutMs}ms (${url}).`,
+        0,
+        error,
+      );
     }
     throw new ApiError(
       `Network error: unable to reach server (${url}). Check API base URL / Wi-Fi / backend status.`,
@@ -111,7 +113,11 @@ export async function apiRequest<T>(
 
   if (!response.ok) {
     throw new ApiError(
-      getErrorMessage(response.status, payload, `Request failed with status ${response.status}`),
+      getErrorMessage(
+        response.status,
+        payload,
+        `Request failed with status ${response.status}`,
+      ),
       response.status,
       payload ?? text,
     );
@@ -121,5 +127,5 @@ export async function apiRequest<T>(
     return undefined as T;
   }
 
-  return ((payload ?? text) as T);
+  return (payload ?? text) as T;
 }
