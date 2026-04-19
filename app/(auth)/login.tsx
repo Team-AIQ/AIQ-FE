@@ -1,22 +1,17 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { KeyboardAwareScreen } from "@/components/keyboard-aware-screen";
 import { API_ENDPOINTS } from "@/constants/api";
 import { AppColors } from "@/constants/theme";
 import { apiRequest, isApiError } from "@/lib/api-client";
 import { saveAuthTokens } from "@/lib/auth-storage";
-import {
-  clearPendingOnboarding,
-  hasPendingOnboarding,
-  hasSeenOnboarding,
-  updateUserProfile,
-} from "@/lib/user-session";
+import { updateUserProfile } from "@/lib/user-session";
 import type { LoginResponse } from "@/types/api";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { jwtDecode } from "jwt-decode";
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
+  Animated,
   Dimensions,
   Image,
   Keyboard,
@@ -30,6 +25,19 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 const { width, height } = Dimensions.get("window");
+const STAR_COUNT = 70;
+
+const generateStars = (count: number) =>
+  Array.from({ length: count }, (_, index) => {
+    const seed = index * 9973;
+    const rand = (n: number) => (Math.sin(n) + 1) / 2;
+    return {
+      x: rand(seed) * width,
+      y: rand(seed + 1) * height,
+      size: 1 + rand(seed + 2) * 2.1,
+      opacity: 0.05 + rand(seed + 3) * 0.15,
+    };
+  });
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -38,6 +46,49 @@ export default function LoginScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [autoLogin, setAutoLogin] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const twinkleAnim = useRef(new Animated.Value(0)).current;
+  const stars = useMemo(() => generateStars(STAR_COUNT), []);
+
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(twinkleAnim, {
+          toValue: 1,
+          duration: 2800,
+          useNativeDriver: true,
+        }),
+        Animated.timing(twinkleAnim, {
+          toValue: 0,
+          duration: 2800,
+          useNativeDriver: true,
+        }),
+      ]),
+    ).start();
+  }, [twinkleAnim]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const loadAutoLoginPreference = async () => {
+      const saved = await AsyncStorage.getItem("autoLogin");
+      if (mounted) {
+        setAutoLogin(saved === "true");
+      }
+
+      if (__DEV__) {
+        console.log("[Login] autoLogin loaded", {
+          checked: saved === "true" ? "ON" : "OFF",
+          saved: saved ?? "unset",
+        });
+      }
+    };
+
+    void loadAutoLoginPreference();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const isFormValid = email.length > 0 && password.length > 0;
 
@@ -61,6 +112,11 @@ export default function LoginScreen() {
 
     setIsLoading(true);
 
+    console.log("[Login] submitting", {
+      endpoint: API_ENDPOINTS.LOGIN,
+      email,
+      password: password ? "***" : "",
+    });
     try {
       const data = await apiRequest<LoginResponse>(API_ENDPOINTS.LOGIN, {
         method: "POST",
@@ -79,40 +135,41 @@ export default function LoginScreen() {
       }
 
       await saveAuthTokens(accessToken, refreshToken);
-      const decoded = jwtDecode<Record<string, unknown>>(accessToken);
-      const nicknameFromToken =
-        (decoded.nickname as string | undefined) ??
-        (decoded.name as string | undefined) ??
-        (decoded.userName as string | undefined) ??
-        (decoded.username as string | undefined);
-      const emailFromToken = (decoded.email as string | undefined) ?? email;
+
+      const externalProfile =
+        (data as any)?.profile ?? (data as any)?.user ?? null;
+      const profileNickname = externalProfile?.nickname || "";
+      const profileEmail = externalProfile?.email || email;
+
       await updateUserProfile({
-        email: emailFromToken,
-        nickname: nicknameFromToken,
+        nickname: profileNickname ? profileNickname : undefined,
+        email: profileEmail,
       });
 
       if (autoLogin) {
         await AsyncStorage.setItem("autoLogin", "true");
+        if (__DEV__) {
+          console.log("[Login] autoLogin saved", {
+            checked: "ON",
+            saved: "true",
+          });
+        }
       } else {
         await AsyncStorage.removeItem("autoLogin");
+        if (__DEV__) {
+          console.log("[Login] autoLogin saved", {
+            checked: "OFF",
+            saved: "unset",
+          });
+        }
       }
-      const userKey =
-        (decoded.userId as number | undefined)?.toString() ?? emailFromToken ?? email;
-      const alreadySeen = await hasSeenOnboarding(userKey);
-      const pending = await hasPendingOnboarding(userKey);
-      const isNewUser =
-        (decoded.isNewUser as boolean | undefined) ??
-        (decoded.newUser as boolean | undefined) ??
-        false;
-      if (alreadySeen) {
-        router.replace("/(tabs)");
-      } else if (pending || isNewUser) {
-        await clearPendingOnboarding(userKey);
-        router.replace("/(auth)/onboarding");
-      } else {
-        router.replace("/(tabs)");
-      }
+
+      const onboardingRequired =
+        (await AsyncStorage.getItem("onboarding_required")) === "true";
+
+      router.replace(onboardingRequired ? "/(auth)/onboarding" : "/(tabs)");
     } catch (error) {
+      console.error("[Login] error", error);
       if (isApiError(error)) {
         Alert.alert("로그인 실패", error.message);
       } else {
@@ -127,6 +184,36 @@ export default function LoginScreen() {
     <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
       <SafeAreaView style={styles.safeArea}>
         <StatusBar style="light" />
+
+        <View style={styles.spaceBackground} pointerEvents="none">
+          <Animated.View
+            style={[
+              styles.starsLayer,
+              {
+                opacity: twinkleAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [0.55, 0.85],
+                }),
+              },
+            ]}
+          >
+            {stars.map((star, index) => (
+              <View
+                key={`star-${index}`}
+                style={[
+                  styles.star,
+                  {
+                    left: star.x,
+                    top: star.y,
+                    width: star.size,
+                    height: star.size,
+                    opacity: star.opacity,
+                  },
+                ]}
+              />
+            ))}
+          </Animated.View>
+        </View>
 
         <KeyboardAwareScreen style={styles.container}>
           <TouchableOpacity
@@ -192,7 +279,19 @@ export default function LoginScreen() {
             <View style={styles.optionsRow}>
               <TouchableOpacity
                 style={styles.checkboxContainer}
-                onPress={() => setAutoLogin(!autoLogin)}
+                onPress={() => {
+                  setAutoLogin((prev) => {
+                    const next = !prev;
+
+                    if (__DEV__) {
+                      console.log("[Login] autoLogin toggled", {
+                        checked: next ? "ON" : "OFF",
+                      });
+                    }
+
+                    return next;
+                  });
+                }}
               >
                 <Image
                   source={
@@ -205,7 +304,9 @@ export default function LoginScreen() {
                 <Text style={styles.checkboxLabel}>자동 로그인</Text>
               </TouchableOpacity>
 
-              <TouchableOpacity onPress={() => router.push("/(auth)/forgot-password")}>
+              <TouchableOpacity
+                onPress={() => router.push("/(auth)/forgot-password")}
+              >
                 <Text style={styles.forgotPassword}>비밀번호찾기</Text>
               </TouchableOpacity>
             </View>
@@ -255,6 +356,18 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: AppColors.black,
+  },
+  spaceBackground: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "#020203",
+  },
+  starsLayer: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  star: {
+    position: "absolute",
+    backgroundColor: "rgba(255,255,255,0.7)",
+    borderRadius: 999,
   },
   backButton: {
     position: "absolute",

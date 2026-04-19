@@ -1,9 +1,6 @@
 ﻿import StarfieldBackground from "@/components/starfield-background";
 import { AppColors } from "@/constants/theme";
-import {
-  AIProviderSettings,
-  UserProfile,
-} from "@/lib/user-session";
+import { AIProviderSettings, UserProfile } from "@/lib/user-session";
 import type { HistoryResponseItem } from "@/types/api";
 import {
   Modal,
@@ -15,7 +12,10 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context";
 
 type MenuDrawerProps = {
   open: boolean;
@@ -172,7 +172,9 @@ export function MenuDrawer({
                             {item.question}
                           </Text>
                           <Text style={styles.historyDate}>
-                            {new Date(item.createdAt).toLocaleDateString("ko-KR")}
+                            {new Date(item.createdAt).toLocaleDateString(
+                              "ko-KR",
+                            )}
                           </Text>
                         </View>
                       </TouchableOpacity>
@@ -187,27 +189,30 @@ export function MenuDrawer({
                 AI 응답 설정
               </Text>
               <View style={[styles.toggleGroup, styles.toggleGroupSpaced]}>
-              {(
-                ["chatgpt", "gemini", "perplexity"] as Array<
-                  keyof AIProviderSettings
-                >
-              ).map((key) => (
-                <View key={key} style={styles.toggleRow}>
-                  <Text style={styles.toggleLabel}>
-                    {key === "chatgpt"
-                      ? "Chat GPT"
-                      : key === "gemini"
-                        ? "Gemini"
-                        : "Perplexity"}
-                  </Text>
-                  <Switch
-                    value={settings[key]}
-                    onValueChange={(value) => onToggleProvider(key, value)}
-                    trackColor={{ false: "#555", true: AppColors.primaryGreen }}
-                    thumbColor={AppColors.white}
-                  />
-                </View>
-              ))}
+                {(
+                  ["chatgpt", "gemini", "perplexity"] as Array<
+                    keyof AIProviderSettings
+                  >
+                ).map((key) => (
+                  <View key={key} style={styles.toggleRow}>
+                    <Text style={styles.toggleLabel}>
+                      {key === "chatgpt"
+                        ? "Chat GPT"
+                        : key === "gemini"
+                          ? "Gemini"
+                          : "Perplexity"}
+                    </Text>
+                    <Switch
+                      value={settings[key]}
+                      onValueChange={(value) => onToggleProvider(key, value)}
+                      trackColor={{
+                        false: "#555",
+                        true: AppColors.primaryGreen,
+                      }}
+                      thumbColor={AppColors.white}
+                    />
+                  </View>
+                ))}
               </View>
             </View>
           </SafeAreaView>
@@ -463,4 +468,3 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
 });
-

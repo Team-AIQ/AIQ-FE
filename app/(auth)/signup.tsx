@@ -9,7 +9,6 @@ import {
   setCredits,
   setPendingOnboarding,
 } from "@/lib/user-session";
-import Constants from "expo-constants";
 import * as Linking from "expo-linking";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
@@ -55,7 +54,7 @@ export default function SignupScreen() {
   }>();
 
   const isValidEmail = /\S+@\S+\.\S+/.test(email);
-  const originParam = Constants.appOwnership === "expo" ? "expo" : "app";
+  const originParam = Platform.OS === "web" ? "web" : "app";
 
   const validatePassword = (value: string) => {
     const regex = /^(?=.*[a-z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,16}$/;
@@ -204,13 +203,7 @@ export default function SignupScreen() {
       });
       await setCredits(20);
       await setPendingOnboarding(email.trim());
-
-      Alert.alert("회원가입 성공", "로그인 화면으로 이동합니다.", [
-        {
-          text: "확인",
-          onPress: () => router.replace("/(auth)/login"),
-        },
-      ]);
+      router.replace("/(auth)/login");
     } catch (error) {
       if (isApiError(error)) {
         setEmailError(error.message);

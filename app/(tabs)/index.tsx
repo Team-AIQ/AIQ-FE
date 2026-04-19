@@ -12,10 +12,10 @@ import {
   clearSessionData,
   decrementCredits,
   getAIProviderSettings,
+  getChatHistory,
   getCredits,
   getUserProfile,
   saveAIProviderSettings,
-  saveUserProfile,
   setCredits,
   UserProfile,
 } from "@/lib/user-session";
@@ -25,6 +25,7 @@ import type {
   CurationResponse,
   FinalReportResponse,
   HistoryResponseItem,
+  TopProduct,
 } from "@/types/api";
 import { useFocusEffect } from "@react-navigation/native";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -39,6 +40,7 @@ import {
   Image,
   Keyboard,
   KeyboardAvoidingView,
+  KeyboardEvent,
   Linking,
   Modal,
   Platform,
@@ -49,7 +51,10 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context";
 import EventSource from "react-native-sse";
 import GeminiIcon from "../../assets/images/gemini-color.svg";
 import OpenAiIcon from "../../assets/images/openai.svg";
@@ -97,8 +102,9 @@ function extractPayload(payload: RawCurationPayload | unknown) {
 
 function unwrapApiResponse<T>(raw: ApiResponse<T> | unknown) {
   if (raw && typeof raw === "object") {
-    const record = raw as ApiResponse<T>;
+    const record = raw as ApiResponse<T> & { result?: T };
     if (record.data !== undefined) return record.data;
+    if (record.result !== undefined) return record.result;
   }
   return null;
 }
@@ -182,6 +188,11 @@ function normalizeCurationResponse(
 
 type RawFinalReportPayload = Record<string, unknown>;
 
+type FetchReportResult = {
+  report: FinalReportResponse;
+  aiResponses: Record<string, AiRecommendationResponse | null>;
+};
+
 function normalizeTopProduct(value: unknown): TopProduct | null {
   if (!value || typeof value !== "object") return null;
   const record = value as Record<string, unknown>;
@@ -245,33 +256,39 @@ function normalizeFinalReportResponse(
   const payload = extractPayload(raw);
   if (!payload) return null;
 
+  // Some APIs return { finalReport, individualReports } shape.
+  const finalReportSource =
+    payload.finalReport && typeof payload.finalReport === "object"
+      ? (payload.finalReport as Record<string, unknown>)
+      : payload;
+
   const topProductsRaw =
-    (payload.topProducts as unknown) ??
-    (payload.top_products as unknown) ??
-    (payload.products as unknown) ??
+    (finalReportSource.topProducts as unknown) ??
+    (finalReportSource.top_products as unknown) ??
+    (finalReportSource.products as unknown) ??
     [];
   const topProducts = Array.isArray(topProductsRaw)
     ? topProductsRaw.map(normalizeTopProduct).filter(Boolean)
     : [];
 
   const consensus =
-    (payload.consensus as string | undefined) ??
-    (payload.aiConsensus as string | undefined) ??
-    (payload.ai_consensus as string | undefined) ??
+    (finalReportSource.consensus as string | undefined) ??
+    (finalReportSource.aiConsensus as string | undefined) ??
+    (finalReportSource.ai_consensus as string | undefined) ??
     "";
   const decisionBranches =
-    (payload.decisionBranches as string | undefined) ??
-    (payload.decision_branches as string | undefined) ??
-    (payload.modelDecisionBranches as string | undefined) ??
+    (finalReportSource.decisionBranches as string | undefined) ??
+    (finalReportSource.decision_branches as string | undefined) ??
+    (finalReportSource.modelDecisionBranches as string | undefined) ??
     "";
   const aiqRecommendationReason =
-    (payload.aiqRecommendationReason as string | undefined) ??
-    (payload.aiq_recommendation_reason as string | undefined) ??
-    (payload.recommendationReason as string | undefined) ??
+    (finalReportSource.aiqRecommendationReason as string | undefined) ??
+    (finalReportSource.aiq_recommendation_reason as string | undefined) ??
+    (finalReportSource.recommendationReason as string | undefined) ??
     "";
   const finalWord =
-    (payload.finalWord as string | undefined) ??
-    (payload.final_word as string | undefined) ??
+    (finalReportSource.finalWord as string | undefined) ??
+    (finalReportSource.final_word as string | undefined) ??
     "";
 
   if (
@@ -293,8 +310,148 @@ function normalizeFinalReportResponse(
   };
 }
 
+function mapModelKey(value: string): ModelKey | null {
+  const normalized = value.toLowerCase();
+  if (normalized.includes("gpt") || normalized.includes("chatgpt")) {
+    return "GPT";
+  }
+  if (normalized.includes("gemini")) {
+    return "Gemini";
+  }
+  if (normalized.includes("perplexity")) {
+    return "Perplexity";
+  }
+  return null;
+}
+
+function normalizeAiRecommendation(
+  raw: unknown,
+): AiRecommendationResponse | null {
+  if (!raw || typeof raw !== "object") return null;
+  const record = raw as Record<string, unknown>;
+
+  const recommendationsRaw =
+    (record.recommendations as unknown) ??
+    (record.products as unknown) ??
+    (record.topProducts as unknown) ??
+    [];
+
+  const recommendations = Array.isArray(recommendationsRaw)
+    ? recommendationsRaw
+        .map((item) => {
+          if (!item || typeof item !== "object") return null;
+          const rec = item as Record<string, unknown>;
+          const selectionReasonsRaw =
+            (rec.selectionReasons as unknown) ??
+            (rec.selection_reasons as unknown) ??
+            (rec.reasons as unknown) ??
+            [];
+          const selectionReasons = Array.isArray(selectionReasonsRaw)
+            ? selectionReasonsRaw.filter(
+                (reason): reason is string => typeof reason === "string",
+              )
+            : [];
+
+          return {
+            productName:
+              (rec.productName as string | undefined) ??
+              (rec.product_name as string | undefined) ??
+              (rec.name as string | undefined) ??
+              "",
+            productCode:
+              (rec.productCode as string | undefined) ??
+              (rec.product_code as string | undefined) ??
+              (rec.code as string | undefined) ??
+              "",
+            targetAudience:
+              (rec.targetAudience as string | undefined) ??
+              (rec.target_audience as string | undefined) ??
+              "",
+            selectionReasons,
+          };
+        })
+        .filter(
+          (
+            recommendation,
+          ): recommendation is {
+            productName: string;
+            productCode: string;
+            targetAudience: string;
+            selectionReasons: string[];
+          } => recommendation !== null,
+        )
+    : [];
+
+  return {
+    modelName:
+      (record.modelName as string | undefined) ??
+      (record.model_name as string | undefined) ??
+      (record.provider as string | undefined) ??
+      "",
+    recommendations,
+    specGuide:
+      (record.specGuide as string | undefined) ??
+      (record.spec_guide as string | undefined) ??
+      (record.summary as string | undefined) ??
+      "",
+    finalWord:
+      (record.finalWord as string | undefined) ??
+      (record.final_word as string | undefined) ??
+      "",
+  };
+}
+
+function extractAiResponses(raw: unknown) {
+  const payload = extractPayload(raw);
+  if (!payload) return {};
+
+  const reportsRaw =
+    (payload.individualReports as unknown) ??
+    (payload.individual_reports as unknown) ??
+    [];
+  if (!Array.isArray(reportsRaw)) return {};
+
+  const mapped: Record<string, AiRecommendationResponse | null> = {};
+
+  reportsRaw.forEach((item) => {
+    if (!item || typeof item !== "object") return;
+    const record = item as Record<string, unknown>;
+
+    let normalized = normalizeAiRecommendation(record);
+
+    // Some backends wrap model payload as JSON string in `content`.
+    if (
+      (!normalized?.specGuide || normalized.recommendations.length === 0) &&
+      typeof record.content === "string"
+    ) {
+      try {
+        const parsedContent = JSON.parse(record.content) as unknown;
+        normalized = normalizeAiRecommendation(parsedContent) ?? normalized;
+      } catch {
+        // Ignore malformed content JSON.
+      }
+    }
+
+    const modelName =
+      normalized?.modelName ||
+      (record.modelName as string | undefined) ||
+      (record.model_name as string | undefined) ||
+      (record.provider as string | undefined) ||
+      (record.modelId as string | undefined) ||
+      (record.model_id as string | undefined) ||
+      "";
+
+    const modelKey = mapModelKey(modelName);
+    if (!modelKey || !normalized) return;
+    mapped[modelKey] = normalized;
+  });
+
+  return mapped;
+}
+
 export default function HomeScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{
     continue?: string;
     provider?: string;
@@ -315,6 +472,9 @@ export default function HomeScreen() {
     CategoryQuestion[] | null
   >(null);
   const [pendingQueryId, setPendingQueryId] = useState<number | null>(null);
+  const [activeReportQueryId, setActiveReportQueryId] = useState<number | null>(
+    null,
+  );
   const [isReportGenerating, setIsReportGenerating] = useState(false);
   const [analysisStatus, setAnalysisStatus] = useState<
     Record<string, "pending" | "complete" | "error">
@@ -338,40 +498,24 @@ export default function HomeScreen() {
   const [isAtBottom, setIsAtBottom] = useState(true);
   const [inputAreaHeight, setInputAreaHeight] = useState(0);
   const [reportActionHeight, setReportActionHeight] = useState(0);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [showTop3Info, setShowTop3Info] = useState(false);
   const [isHistoryReport, setIsHistoryReport] = useState(false);
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
   const [isInputFocused, setIsInputFocused] = useState(false);
   const flatListRef = useRef<FlatList>(null);
+  const isAtBottomRef = useRef(true);
   const glowAnim = useRef(new Animated.Value(0.5)).current;
   const floatAnim = useRef(new Animated.Value(0)).current;
   const bounceAnim = useRef(new Animated.Value(0)).current;
   const dotAnim = useRef(new Animated.Value(0)).current;
   const sseRef = useRef<any>(null);
+  const suppressAutoScrollRef = useRef(false);
 
   const syncCredits = async (value: number) => {
     setCreditsState(value);
     await setCredits(value);
   };
-
-  const refreshProfileFromApi = useCallback(async () => {
-    try {
-      const response = await apiRequest<ApiResponse<UserProfile>>(
-        API_ENDPOINTS.PROFILE_UPDATE,
-        {
-          method: "GET",
-          requireAuth: true,
-        },
-      );
-      const data = unwrapApiResponse<UserProfile>(response);
-      if (data) {
-        setProfile(data);
-        await saveUserProfile(data);
-      }
-    } catch {
-      // Ignore profile refresh errors to keep app responsive.
-    }
-  }, []);
 
   const refreshHistory = useCallback(async () => {
     try {
@@ -385,10 +529,68 @@ export default function HomeScreen() {
       const data = unwrapApiResponse<HistoryResponseItem[]>(response);
       if (Array.isArray(data)) {
         setHistory(data);
+        return data;
       }
     } catch {
-      // Ignore history refresh errors.
+      // Ignore history refresh errors and fall back to local session history.
     }
+
+    try {
+      const localHistory = await getChatHistory();
+      const fallbackHistory = localHistory.map((item) => ({
+        queryId: Number(item.id) || Date.now(),
+        question: item.title,
+        createdAt: item.createdAt,
+      }));
+      setHistory(fallbackHistory);
+      return fallbackHistory;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const fetchReportByQueryId = useCallback(async (queryId: number) => {
+    const candidates = [`${API_ENDPOINTS.CURATION_HISTORY}/${queryId}/report`];
+
+    for (const url of candidates) {
+      try {
+        const response = await apiRequest<ApiResponse<unknown>>(url, {
+          method: "GET",
+          requireAuth: true,
+        });
+        const raw = unwrapApiResponse<unknown>(response) ?? response;
+        const report = normalizeFinalReportResponse(raw);
+        if (report) {
+          return {
+            report,
+            aiResponses: extractAiResponses(raw),
+          } satisfies FetchReportResult;
+        }
+        console.warn("[fetchReportByQueryId] response could not normalize", {
+          url,
+          response,
+        });
+      } catch (error) {
+        if (isApiError(error)) {
+          if (error.status === 404 || error.status === 500) {
+            continue;
+          }
+          console.warn("[fetchReportByQueryId] api error", {
+            url,
+            status: error.status,
+            message: error.message,
+            payload: error.payload,
+          });
+        } else {
+          console.error("[fetchReportByQueryId] unexpected error", {
+            url,
+            error,
+          });
+        }
+        throw error;
+      }
+    }
+    return null;
   }, []);
 
   const loadUserData = useCallback(async () => {
@@ -401,9 +603,8 @@ export default function HomeScreen() {
     setProfile(storedProfile);
     setCreditsState(nextCredits);
     setProviderSettings(nextSettings);
-    await refreshProfileFromApi();
     await refreshHistory();
-  }, [refreshHistory, refreshProfileFromApi]);
+  }, [refreshHistory]);
 
   useFocusEffect(
     useCallback(() => {
@@ -417,7 +618,7 @@ export default function HomeScreen() {
   }, [isMenuOpen, loadUserData]);
 
   useEffect(() => {
-    Animated.loop(
+    const glowLoop = Animated.loop(
       Animated.sequence([
         Animated.timing(glowAnim, {
           toValue: 0.6,
@@ -430,17 +631,25 @@ export default function HomeScreen() {
           useNativeDriver: false,
         }),
       ]),
-    ).start();
+    );
 
-    Animated.loop(
-      Animated.timing(dotAnim, {
-        toValue: 1,
-        duration: 1200,
-        useNativeDriver: true,
-      }),
-    ).start();
+    dotAnim.setValue(0);
+    const dotLoop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(dotAnim, {
+          toValue: 1,
+          duration: 1100,
+          useNativeDriver: true,
+        }),
+        Animated.timing(dotAnim, {
+          toValue: 0,
+          duration: 0,
+          useNativeDriver: true,
+        }),
+      ]),
+    );
 
-    Animated.loop(
+    const floatLoop = Animated.loop(
       Animated.sequence([
         Animated.timing(floatAnim, {
           toValue: -8,
@@ -453,9 +662,9 @@ export default function HomeScreen() {
           useNativeDriver: true,
         }),
       ]),
-    ).start();
+    );
 
-    Animated.loop(
+    const bounceLoop = Animated.loop(
       Animated.sequence([
         Animated.timing(bounceAnim, {
           toValue: -3,
@@ -468,7 +677,12 @@ export default function HomeScreen() {
           useNativeDriver: true,
         }),
       ]),
-    ).start();
+    );
+
+    glowLoop.start();
+    dotLoop.start();
+    floatLoop.start();
+    bounceLoop.start();
 
     const showEvent =
       Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
@@ -477,18 +691,29 @@ export default function HomeScreen() {
 
     const keyboardShowListener = Keyboard.addListener(
       showEvent,
-      () => setIsKeyboardVisible(true),
+      (event: KeyboardEvent) => {
+        setIsKeyboardVisible(true);
+        const height = event.endCoordinates?.height ?? 0;
+        setKeyboardHeight(height);
+        if (isAtBottomRef.current) {
+          setTimeout(scrollToBottom, 50);
+        }
+      },
     );
-    const keyboardHideListener = Keyboard.addListener(
-      hideEvent,
-      () => setIsKeyboardVisible(false),
-    );
+    const keyboardHideListener = Keyboard.addListener(hideEvent, () => {
+      setIsKeyboardVisible(false);
+      setKeyboardHeight(0);
+    });
 
     return () => {
       keyboardShowListener.remove();
       keyboardHideListener.remove();
+      glowLoop.stop();
+      dotLoop.stop();
+      floatLoop.stop();
+      bounceLoop.stop();
     };
-  }, [bounceAnim, floatAnim, glowAnim]);
+  }, [bounceAnim, dotAnim, floatAnim, glowAnim]);
 
   useEffect(() => {
     return () => {
@@ -500,7 +725,7 @@ export default function HomeScreen() {
   }, []);
 
   useEffect(() => {
-    if (params.continue !== "1") return;
+    if (params.continue !== "true") return;
 
     let mounted = true;
 
@@ -534,12 +759,18 @@ export default function HomeScreen() {
       setInputText(session.initialQuestion);
     };
 
-    hydrate();
+    void hydrate();
 
     return () => {
       mounted = false;
     };
   }, [params.continue, params.provider]);
+
+  useEffect(() => {
+    if (activeReport || isReportGenerating) {
+      setInputAreaHeight(0);
+    }
+  }, [activeReport, isReportGenerating]);
 
   const appendMessage = (message: Message) => {
     setMessages((prev) => [...prev, message]);
@@ -551,9 +782,36 @@ export default function HomeScreen() {
     }, 100);
   };
 
+  const scrollToLatestReport = (animated = true) => {
+    const reportIndex = [...messages]
+      .map((message, index) => ({ message, index }))
+      .filter(({ message }) => message.kind === "report")
+      .map(({ index }) => index)
+      .pop();
+
+    if (typeof reportIndex !== "number") return;
+
+    setTimeout(() => {
+      try {
+        flatListRef.current?.scrollToIndex({
+          index: reportIndex,
+          viewPosition: 0,
+          animated,
+        });
+      } catch {
+        // Ignore scrollToIndex errors (e.g., not measured yet).
+      }
+    }, 50);
+  };
+
   const handleContentSizeChange = (_: number, height: number) => {
     setContentHeight(height);
+    if (suppressAutoScrollRef.current) {
+      suppressAutoScrollRef.current = false;
+      return;
+    }
     if (listHeight > 0 && height > listHeight && isAtBottom) {
+      if (activeReport) return;
       scrollToBottom();
     }
   };
@@ -570,6 +828,7 @@ export default function HomeScreen() {
     const atBottom =
       layoutMeasurement.height + contentOffset.y >=
       contentSize.height - paddingToBottom;
+    isAtBottomRef.current = atBottom;
     setIsAtBottom(atBottom);
   };
 
@@ -582,6 +841,7 @@ export default function HomeScreen() {
     setIsAwaitingConsent(false);
     setPendingQuestions(null);
     setPendingQueryId(null);
+    setActiveReportQueryId(null);
     setIsReportGenerating(false);
     setOpenProvider(null);
     setAnalysisStatus({});
@@ -599,13 +859,29 @@ export default function HomeScreen() {
     setShowTop3(false);
     setOpenProvider(null);
     setActiveReport(report);
-    appendMessage({
-      id: `${Date.now()}-report`,
-      type: "ai",
-      text: "",
-      timestamp: new Date(),
-      kind: "report",
-      reportData: report,
+    suppressAutoScrollRef.current = true;
+    setMessages((prev) => {
+      const next = prev.filter((message) => message.kind !== "report-loading");
+      next.push({
+        id: `${Date.now()}-report`,
+        type: "ai",
+        text: "",
+        timestamp: new Date(),
+        kind: "report",
+        reportData: report,
+      });
+      requestAnimationFrame(() => {
+        try {
+          flatListRef.current?.scrollToIndex({
+            index: next.length - 1,
+            viewPosition: 0,
+            animated: true,
+          });
+        } catch {
+          // Ignore scrollToIndex errors (e.g., not measured yet).
+        }
+      });
+      return next;
     });
   };
 
@@ -687,7 +963,6 @@ export default function HomeScreen() {
       setPendingQueryId(null);
       setIsHistoryReport(false);
       refreshHistory();
-      scrollToBottom();
     } catch {
       Alert.alert("오류", "리포트를 표시하는 중 문제가 발생했습니다.");
       setIsReportGenerating(false);
@@ -698,23 +973,15 @@ export default function HomeScreen() {
     const maxAttempts = 30;
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
       try {
-        const response = await apiRequest<ApiResponse<unknown>>(
-          `${API_ENDPOINTS.CURATION_REPORT}/${queryId}/report`,
-          {
-            method: "GET",
-            requireAuth: true,
-          },
-        );
-        const data = unwrapApiResponse<unknown>(response);
-        const report = normalizeFinalReportResponse(data);
-        if (report) {
-          appendReportMessage(report);
+        const result = await fetchReportByQueryId(queryId);
+        if (result) {
+          appendReportMessage(result.report);
+          setAiResponses(result.aiResponses);
           setIsReportGenerating(false);
           setPendingQuestions(null);
           setPendingQueryId(null);
           setIsHistoryReport(false);
           refreshHistory();
-          scrollToBottom();
           return;
         }
       } catch {
@@ -785,7 +1052,7 @@ export default function HomeScreen() {
     appendMessage({
       id: `${Date.now()}-consent`,
       type: "ai",
-      text: "리포트 생성 시 3크레딧이 차감됩니다. 진행할까요?",
+      text: "리포트를 생성할까요?\n*비동의시 메인화면으로 재이동됩니다.",
       timestamp: new Date(),
       options: ["동의", "비동의"],
       kind: "status",
@@ -833,6 +1100,7 @@ export default function HomeScreen() {
 
     setIsReportGenerating(true);
     setShowTop3(false);
+    setActiveReportQueryId(pendingQueryId);
     if (sseRef.current) {
       sseRef.current.close?.();
       sseRef.current = null;
@@ -911,13 +1179,6 @@ export default function HomeScreen() {
       return;
     }
 
-    appendMessage({
-      id: `${Date.now()}-complete`,
-      type: "ai",
-      text: "큐레이션이 완료되었습니다.",
-      timestamp: new Date(),
-    });
-    scrollToBottom();
     requestReportConsent(updatedQuestions);
   };
 
@@ -1096,16 +1357,8 @@ export default function HomeScreen() {
   const handleSelectHistory = async (item: HistoryResponseItem) => {
     setIsMenuOpen(false);
     try {
-      const response = await apiRequest<ApiResponse<unknown>>(
-        `${API_ENDPOINTS.CURATION_REPORT}/${item.queryId}/report`,
-        {
-          method: "GET",
-          requireAuth: true,
-        },
-      );
-      const raw = unwrapApiResponse<unknown>(response);
-      const report = normalizeFinalReportResponse(raw);
-      if (!report) {
+      const result = await fetchReportByQueryId(item.queryId);
+      if (!result) {
         Alert.alert("안내", "리포트를 생성하지 않았습니다.");
         return;
       }
@@ -1117,10 +1370,10 @@ export default function HomeScreen() {
       setPendingQueryId(null);
       setIsReportGenerating(false);
       setAnalysisStatus({});
-      setAiResponses({});
-      setShowTop3(false);
+      setAiResponses(result.aiResponses);
+      setShowTop3((result.report.topProducts?.length ?? 0) > 1);
       setIsHistoryReport(true);
-      appendReportMessage(report);
+      appendReportMessage(result.report);
       scrollToBottom();
     } catch (error) {
       Alert.alert("안내", "리포트를 생성하지 않았습니다.");
@@ -1198,7 +1451,16 @@ export default function HomeScreen() {
               {[0, 1, 2, 3, 4].map((index) => (
                 <Animated.View
                   key={`report-dot-${index}`}
-                  style={[styles.loadingDot, { opacity: dotOpacity(index) }]}
+                  style={[
+                    styles.loadingDot,
+                    {
+                      opacity: dotOpacity(index),
+                      transform: [
+                        { translateY: dotTranslateY(index) },
+                        { scale: dotScale(index) },
+                      ],
+                    },
+                  ]}
                 />
               ))}
             </View>
@@ -1478,6 +1740,40 @@ export default function HomeScreen() {
     });
   };
 
+  const dotTranslateY = (index: number) => {
+    const peak = -2;
+    const rest = 0;
+    const outputRanges: Record<number, number[]> = {
+      0: [peak, rest, rest, rest, rest, peak],
+      1: [rest, peak, rest, rest, rest, rest],
+      2: [rest, rest, peak, rest, rest, rest],
+      3: [rest, rest, rest, peak, rest, rest],
+      4: [rest, rest, rest, rest, peak, rest],
+    };
+
+    return dotAnim.interpolate({
+      inputRange: [0, 0.2, 0.4, 0.6, 0.8, 1],
+      outputRange: outputRanges[index] ?? outputRanges[0],
+    });
+  };
+
+  const dotScale = (index: number) => {
+    const peak = 1.65;
+    const rest = 1;
+    const outputRanges: Record<number, number[]> = {
+      0: [peak, rest, rest, rest, rest, peak],
+      1: [rest, peak, rest, rest, rest, rest],
+      2: [rest, rest, peak, rest, rest, rest],
+      3: [rest, rest, rest, peak, rest, rest],
+      4: [rest, rest, rest, rest, peak, rest],
+    };
+
+    return dotAnim.interpolate({
+      inputRange: [0, 0.2, 0.4, 0.6, 0.8, 1],
+      outputRange: outputRanges[index] ?? outputRanges[0],
+    });
+  };
+
   const renderLoading = () => (
     <View style={styles.messageContainer}>
       <View
@@ -1488,7 +1784,17 @@ export default function HomeScreen() {
           {[0, 1, 2, 3, 4].map((index) => (
             <Animated.View
               key={index}
-              style={[styles.loadingDot, { opacity: dotOpacity(index) }]}
+              style={[
+                styles.loadingDot,
+                styles.loadingDotAnalyzing,
+                {
+                  opacity: dotOpacity(index),
+                  transform: [
+                    { translateY: dotTranslateY(index) },
+                    { scale: dotScale(index) },
+                  ],
+                },
+              ]}
             />
           ))}
         </View>
@@ -1531,13 +1837,13 @@ export default function HomeScreen() {
   );
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={["top"]}>
+    <SafeAreaView style={styles.safeArea} edges={["top", "bottom"]}>
       <StatusBar style="light" />
 
       <KeyboardAvoidingView
         style={styles.container}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-        keyboardVerticalOffset={Platform.OS === "ios" ? 12 : 0}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 20 : 0}
       >
         <StarfieldBackground density={0.0002} maxOpacity={0.8} />
         <View style={styles.pressableContainer}>
@@ -1571,14 +1877,33 @@ export default function HomeScreen() {
                   contentContainerStyle={[
                     styles.messagesList,
                     {
-                      paddingBottom: Math.max(12, inputAreaHeight + 12),
+                      paddingBottom:
+                        Math.max(
+                          24,
+                          (activeReport && !isHistoryReport
+                            ? reportActionHeight
+                            : inputAreaHeight) + 24,
+                        ) +
+                        keyboardHeight +
+                        (isReportGenerating ? 36 : 자0),
                     },
                   ]}
+                  contentInset={{ bottom: keyboardHeight }}
+                  contentOffset={{ x: 0, y: 0 }}
                   showsVerticalScrollIndicator={false}
                   keyboardShouldPersistTaps="handled"
                   onScroll={handleScroll}
                   onScrollBeginDrag={dismissKeyboard}
                   scrollEventThrottle={16}
+                  onScrollToIndexFailed={(info) => {
+                    const fallbackOffset = info.averageItemLength * info.index;
+                    setTimeout(() => {
+                      flatListRef.current?.scrollToOffset({
+                        offset: fallbackOffset,
+                        animated: true,
+                      });
+                    }, 50);
+                  }}
                   onLayout={(event) =>
                     setListHeight(event.nativeEvent.layout.height)
                   }
@@ -1594,39 +1919,79 @@ export default function HomeScreen() {
 
               {activeReport && !isHistoryReport ? (
                 <View
-                  style={styles.reportActionArea}
+                  style={[
+                    styles.reportActionArea,
+                    {
+                      marginBottom: Math.max(12, insets.bottom + 6),
+                    },
+                  ]}
                   onLayout={(event) =>
                     setReportActionHeight(event.nativeEvent.layout.height)
                   }
                 >
                   {!showTop3 && activeReport?.topProducts?.length > 1 ? (
-                    <View style={styles.top3ButtonContainer}>
-                      <TouchableOpacity
-                        style={styles.reportActionButton}
-                        onPress={() => {
-                          setShowTop3(true);
-                          refreshHistory();
-                        }}
-                      >
-                        <Text style={styles.reportActionText}>
+                    <TouchableOpacity
+                      style={[
+                        styles.reportActionButton,
+                        styles.top3ActionButton,
+                      ]}
+                      onPress={() => {
+                        setShowTop3(true);
+                        scrollToLatestReport(true);
+                        refreshHistory();
+                      }}
+                      activeOpacity={0.9}
+                    >
+                      <View style={styles.top3ActionLabel}>
+                        <Text
+                          style={[
+                            styles.reportActionText,
+                            styles.top3ActionText,
+                          ]}
+                          numberOfLines={1}
+                          adjustsFontSizeToFit
+                          minimumFontScale={0.7}
+                        >
                           TOP3까지 확인하기
                         </Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={styles.infoButton}
-                        onPress={() => setShowTop3Info(!showTop3Info)}
+                      </View>
+                      <Pressable
+                        style={styles.top3InfoButton}
+                        hitSlop={10}
+                        onPress={(event) => {
+                          event.stopPropagation?.();
+                          setShowTop3Info(true);
+                        }}
                       >
-                        <Text style={styles.infoButtonText}>?</Text>
-                      </TouchableOpacity>
-                    </View>
+                        <Text style={styles.top3InfoButtonText}>?</Text>
+                      </Pressable>
+                    </TouchableOpacity>
                   ) : null}
                   <TouchableOpacity
                     style={styles.reportActionButton}
                     onPress={async () => {
-                      await refreshHistory();
-                      Alert.alert("완료", "리포트를 히스토리에 저장했습니다.");
+                      const first = await refreshHistory();
+                      await new Promise((resolve) => setTimeout(resolve, 350));
+                      const second = await refreshHistory();
+                      const nextHistory = second ?? first ?? [];
+                      const isSaved = activeReportQueryId
+                        ? nextHistory.some(
+                            (item) => item.queryId === activeReportQueryId,
+                          )
+                        : nextHistory.length > 0;
+
+                      if (isSaved) {
+                        Alert.alert(
+                          "완료",
+                          "리포트를 히스토리에 저장했습니다.",
+                        );
+                      } else {
+                        Alert.alert(
+                          "안내",
+                          "히스토리에 아직 반영되지 않았어요. 잠시 후 메뉴에서 다시 확인해 주세요.",
+                        );
+                      }
                       resetConversation();
-                      router.replace("/(tabs)/index");
                     }}
                   >
                     <Text style={styles.reportActionText}>완료하기</Text>
@@ -1693,52 +2058,57 @@ export default function HomeScreen() {
             </View>
           </Modal>
 
-          <View
-            style={styles.inputContainer}
-            onLayout={(event) =>
-              setInputAreaHeight(event.nativeEvent.layout.height)
-            }
-          >
-            <View style={styles.inputWrapper}>
-              <TextInput
-                style={styles.input}
-                placeholder={
-                  isReportGenerating
-                    ? "리포트를 생성하고 있습니다..."
-                    : "무엇이든 물어보세요"
-                }
-                placeholderTextColor={AppColors.gray}
-                value={inputText}
-                onChangeText={setInputText}
-                onSubmitEditing={handleSend}
-                onFocus={() => setIsInputFocused(true)}
-                onBlur={() => setIsInputFocused(false)}
-                multiline
-                maxLength={500}
-                editable={!isReportGenerating && !isLoading && !activeReport}
-              />
-              <TouchableOpacity
-                style={styles.sendButton}
-                onPress={handleSend}
-                disabled={
-                  !inputText.trim() ||
-                  isLoading ||
-                  isReportGenerating ||
-                  !!activeReport
-                }
-              >
-                <Image
-                  source={
-                    inputText.trim()
-                      ? require("../../assets/images/sending-icon-green.png")
-                      : require("../../assets/images/sending-icon.png")
-                  }
-                  style={styles.sendIconImage}
-                  resizeMode="contain"
+          {!activeReport && !isReportGenerating ? (
+            <View
+              style={[
+                styles.inputContainer,
+                {
+                  paddingBottom: isKeyboardVisible
+                    ? 2
+                    : Math.max(22, insets.bottom + 10),
+                },
+              ]}
+              onLayout={(event) =>
+                setInputAreaHeight(event.nativeEvent.layout.height)
+              }
+            >
+              <View style={styles.inputWrapper}>
+                <TextInput
+                  style={styles.input}
+                  placeholder={"무엇이든 물어보세요"}
+                  placeholderTextColor={AppColors.gray}
+                  value={inputText}
+                  onChangeText={setInputText}
+                  onSubmitEditing={handleSend}
+                  onFocus={() => {
+                    setIsInputFocused(true);
+                    if (isAtBottomRef.current) {
+                      setTimeout(scrollToBottom, 50);
+                    }
+                  }}
+                  onBlur={() => setIsInputFocused(false)}
+                  multiline
+                  maxLength={500}
+                  editable={!isLoading}
                 />
-              </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.sendButton}
+                  onPress={handleSend}
+                  disabled={!inputText.trim() || isLoading}
+                >
+                  <Image
+                    source={
+                      inputText.trim()
+                        ? require("../../assets/images/sending-icon-green.png")
+                        : require("../../assets/images/sending-icon.png")
+                    }
+                    style={styles.sendIconImage}
+                    resizeMode="contain"
+                  />
+                </TouchableOpacity>
+              </View>
             </View>
-          </View>
+          ) : null}
         </View>
       </KeyboardAvoidingView>
 
@@ -1818,11 +2188,15 @@ const styles = StyleSheet.create({
   },
   pressableContainer: {
     flex: 1,
+    alignItems: "center",
+    paddingHorizontal: 16,
   },
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
+    width: "100%",
+    maxWidth: 940,
     paddingHorizontal: 20,
     paddingVertical: 16,
   },
@@ -1840,19 +2214,24 @@ const styles = StyleSheet.create({
   },
   chatBorderContainer: {
     flex: 1,
-    marginHorizontal: 16,
+    width: "100%",
+    maxWidth: 940,
     marginBottom: 8,
-    borderWidth: 0.3,
+    borderWidth: 0.4,
     borderColor: AppColors.primaryGreen,
-    borderRadius: 16,
+    borderRadius: 20,
     overflow: "hidden",
+    backgroundColor: "rgba(0, 0, 0, 0.18)",
   },
   emptyWrapper: {
     flex: 1,
+    width: "100%",
+    maxWidth: 940,
   },
   messagesList: {
-    paddingHorizontal: 12,
-    paddingVertical: 12,
+    paddingHorizontal: 18,
+    paddingTop: 26,
+    paddingBottom: 18,
   },
   emptyContainer: {
     flex: 1,
@@ -1885,7 +2264,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   messageContainer: {
-    marginVertical: 4,
+    marginVertical: 6,
   },
   userMessageContainer: {
     alignItems: "flex-end",
@@ -1894,7 +2273,7 @@ const styles = StyleSheet.create({
     alignItems: "flex-start",
   },
   aiAvatarRow: {
-    marginBottom: 4,
+    marginBottom: 6,
   },
   userAvatarRow: {
     marginBottom: 4,
@@ -1927,42 +2306,42 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   messageBubble: {
-    maxWidth: "80%",
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    borderRadius: 20,
+    maxWidth: "90%",
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderRadius: 24,
   },
   aiBubble: {
-    backgroundColor: "rgba(0, 0, 0, 0.8)",
+    backgroundColor: "rgba(0, 0, 0, 0.88)",
     borderWidth: 1,
     borderColor: AppColors.primaryGreen,
-    borderTopLeftRadius: 4,
+    borderTopLeftRadius: 6,
     shadowColor: AppColors.primaryGreen,
     shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.5,
-    shadowRadius: 10,
-    elevation: 5,
+    shadowOpacity: 0.45,
+    shadowRadius: 12,
+    elevation: 6,
   },
   userBubble: {
     backgroundColor: AppColors.primaryGreen,
-    borderTopRightRadius: 4,
+    borderTopRightRadius: 6,
     shadowColor: AppColors.primaryGreen,
     shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.5,
-    shadowRadius: 10,
-    elevation: 5,
+    shadowOpacity: 0.45,
+    shadowRadius: 12,
+    elevation: 6,
   },
   messageText: {
-    fontSize: 12,
-    lineHeight: 20,
+    fontSize: 11,
+    lineHeight: 18,
     flexShrink: 1,
     textAlign: "left",
     paddingBottom: 2,
   },
   userText: {
     color: AppColors.black,
-    fontSize: 13,
-    fontWeight: "bold",
+    fontSize: 12,
+    fontWeight: "700",
   },
   aiText: {
     color: AppColors.white,
@@ -1975,17 +2354,24 @@ const styles = StyleSheet.create({
   loadingText: {
     color: AppColors.white,
     fontSize: 12,
-    marginBottom: 8,
+    lineHeight: 18,
+    fontWeight: "700",
+    marginBottom: 14,
   },
   loadingDots: {
     flexDirection: "row",
-    gap: 6,
+    gap: 14,
+    alignSelf: "center",
+    justifyContent: "center",
   },
   loadingDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
     backgroundColor: AppColors.primaryGreen,
+  },
+  loadingDotAnalyzing: {
+    backgroundColor: AppColors.gray,
   },
   listSpacer: {
     height: 8,
@@ -1999,8 +2385,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: AppColors.primaryGreen,
     borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    paddingHorizontal: 18,
+    paddingVertical: 8,
     shadowColor: AppColors.primaryGreen,
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.3,
@@ -2009,7 +2395,7 @@ const styles = StyleSheet.create({
   },
   tooltipText: {
     fontFamily: "Galmuri9",
-    fontSize: 12,
+    fontSize: 11,
     color: AppColors.white,
   },
   tooltipArrow: {
@@ -2024,31 +2410,35 @@ const styles = StyleSheet.create({
     marginTop: -1,
   },
   inputContainer: {
+    width: "100%",
+    maxWidth: 940,
+    alignItems: "center",
     paddingHorizontal: 16,
-    paddingVertical: 8,
-    paddingBottom: Platform.OS === "ios" ? 24 : 12,
+    paddingVertical: 10,
+    paddingBottom: Platform.OS === "ios" ? 26 : 16,
   },
   inputWrapper: {
+    width: "100%",
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: AppColors.white,
-    borderRadius: 50,
+    borderRadius: 999,
     borderWidth: 1,
     borderColor: AppColors.primaryGreen,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
     shadowColor: AppColors.primaryGreen,
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.4,
-    shadowRadius: 20,
+    shadowRadius: 18,
     elevation: 8,
   },
   input: {
     flex: 1,
-    fontSize: 14,
+    fontSize: 15,
     color: AppColors.black,
-    maxHeight: 50,
-    paddingVertical: 8,
+    maxHeight: 64,
+    paddingVertical: 10,
   },
   sendButton: {
     justifyContent: "center",
@@ -2068,37 +2458,43 @@ const styles = StyleSheet.create({
   },
   questionBadgeInline: {
     borderRadius: 999,
-    paddingHorizontal: 9,
-    paddingVertical: 2,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
     backgroundColor: "rgba(63, 221, 144, 0.18)",
     color: AppColors.primaryGreen,
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: "800",
     borderWidth: 1,
-    borderColor: "rgba(63, 221, 144, 0.6)",
+    borderColor: "rgba(63, 221, 144, 0.55)",
     shadowColor: AppColors.primaryGreen,
     shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.6,
+    shadowOpacity: 0.45,
     shadowRadius: 6,
-    elevation: 6,
+    elevation: 4,
   },
   reportLoadingBubble: {
     maxWidth: "90%",
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderRadius: 24,
+    borderTopLeftRadius: 6,
   },
   reportLoadingTitle: {
     color: AppColors.primaryGreen,
-    fontSize: 13,
-    fontWeight: "700",
-    marginBottom: 10,
-    textAlign: "center",
+    fontFamily: "Galmuri9",
+    fontSize: 11,
+    lineHeight: 18,
+    marginBottom: 16,
+    textAlign: "left",
   },
   reportLoadingDots: {
     alignSelf: "center",
     justifyContent: "center",
+    marginBottom: 16,
   },
   providerStatusList: {
-    marginTop: 8,
-    gap: 6,
+    gap: 10,
+    marginTop: 2,
   },
   providerStatusRow: {
     flexDirection: "row",
@@ -2111,9 +2507,9 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   providerStatusBullet: {
-    width: 5,
-    height: 5,
-    borderRadius: 3,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
     backgroundColor: AppColors.primaryGreen,
   },
   providerStatusBulletAnalyzing: {
@@ -2124,11 +2520,15 @@ const styles = StyleSheet.create({
   },
   providerStatusLabel: {
     color: AppColors.primaryGreen,
-    fontSize: 12,
+    fontFamily: "Galmuri9",
+    fontSize: 11,
+    lineHeight: 18,
   },
   providerStatusValue: {
     color: "rgba(63, 221, 144, 0.7)",
-    fontSize: 12,
+    fontFamily: "Galmuri9",
+    fontSize: 11,
+    lineHeight: 18,
   },
   providerStatusTextAnalyzing: {
     color: AppColors.gray,
@@ -2138,40 +2538,45 @@ const styles = StyleSheet.create({
   },
   reportCard: {
     width: "100%",
-    backgroundColor: "rgba(0, 0, 0, 0.85)",
-    borderRadius: 16,
-    padding: 16,
-    gap: 16,
+    backgroundColor: "transparent",
+    borderWidth: 0,
+    borderRadius: 20,
+    padding: 0,
+    gap: 14,
   },
   reportSectionTitle: {
     color: AppColors.primaryGreen,
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: "700",
+    letterSpacing: 0.3,
   },
   topProductGroup: {
-    gap: 16,
+    gap: 18,
   },
   topProductCard: {
-    backgroundColor: "rgba(17, 17, 17, 0.9)",
-    borderRadius: 12,
+    backgroundColor: "rgba(0, 0, 0, 0.42)",
+    borderWidth: 1,
+    borderColor: "rgba(63, 221, 144, 0.22)",
+    borderRadius: 18,
     padding: 14,
-    gap: 10,
+    gap: 12,
   },
   topProductName: {
     color: AppColors.white,
-    fontSize: 14,
-    fontWeight: "700",
+    fontSize: 15,
+    fontWeight: "800",
   },
   topProductPrice: {
     color: AppColors.primaryGreen,
-    fontSize: 16,
-    fontWeight: "700",
+    fontSize: 18,
+    fontWeight: "800",
+    marginTop: 4,
   },
   productImage: {
     width: "100%",
-    height: 180,
-    borderRadius: 10,
-    backgroundColor: "rgba(0,0,0,0.4)",
+    height: 190,
+    borderRadius: 14,
+    backgroundColor: "rgba(0,0,0,0.35)",
   },
   specsRow: {
     flexDirection: "row",
@@ -2180,27 +2585,31 @@ const styles = StyleSheet.create({
   },
   specChip: {
     borderWidth: 1,
-    borderColor: "rgba(63, 221, 144, 0.4)",
-    borderRadius: 10,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
+    borderColor: "rgba(63, 221, 144, 0.35)",
+    borderRadius: 14,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    backgroundColor: "rgba(255,255,255,0.03)",
   },
   specChipText: {
-    color: AppColors.lightGray,
+    color: AppColors.white,
     fontSize: 11,
   },
   topProductReason: {
-    color: AppColors.white,
-    fontSize: 12,
-    lineHeight: 18,
+    color: AppColors.lightGray,
+    fontSize: 13,
+    lineHeight: 20,
+    marginTop: 6,
   },
   buyButton: {
     alignSelf: "flex-end",
     borderWidth: 1,
     borderColor: AppColors.primaryGreen,
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 6,
+    borderRadius: 999,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    marginTop: 10,
+    backgroundColor: "rgba(0,0,0,0.35)",
   },
   buyButtonText: {
     color: AppColors.primaryGreen,
@@ -2212,32 +2621,33 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   reportSummaryContainer: {
-    backgroundColor: "rgba(63, 221, 144, 0.08)",
-    borderRadius: 16,
+    backgroundColor: "rgba(0, 0, 0, 0.42)",
+    borderRadius: 18,
     padding: 14,
     borderWidth: 1,
     borderColor: "rgba(63, 221, 144, 0.22)",
-    gap: 12,
+    gap: 14,
   },
   reportSummarySection: {
-    gap: 6,
+    gap: 10,
   },
   reportSummaryDivider: {
     height: 1,
     backgroundColor: "rgba(63, 221, 144, 0.18)",
+    marginVertical: 4,
   },
   reportParagraphGroup: {
     gap: 6,
   },
   reportSummaryTitle: {
     color: AppColors.primaryGreen,
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: "700",
   },
   reportSummaryText: {
     color: AppColors.white,
-    fontSize: 12,
-    lineHeight: 18,
+    fontSize: 13,
+    lineHeight: 20,
   },
   providerToggleGroup: {
     gap: 10,
@@ -2259,10 +2669,10 @@ const styles = StyleSheet.create({
   },
   providerToggleCard: {
     borderWidth: 1,
-    borderColor: "rgba(63, 221, 144, 0.3)",
-    borderRadius: 12,
-    padding: 12,
-    backgroundColor: "rgba(0, 0, 0, 0.6)",
+    borderColor: "rgba(63, 221, 144, 0.28)",
+    borderRadius: 18,
+    padding: 14,
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
   },
   providerToggleHeader: {
     flexDirection: "row",
@@ -2294,7 +2704,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 8,
+    gap: 10,
   },
   top3ButtonContainer: {
     flex: 1,
@@ -2304,11 +2714,60 @@ const styles = StyleSheet.create({
   },
   reportActionButton: {
     flex: 1,
-    height: 52,
-    borderRadius: 12,
+    height: 56,
+    borderRadius: 28,
     backgroundColor: AppColors.primaryGreen,
     justifyContent: "center",
     alignItems: "center",
+    shadowColor: AppColors.primaryGreen,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.18,
+    shadowRadius: 14,
+    elevation: 6,
+  },
+  top3ActionButton: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: "rgba(0, 0, 0, 0.48)",
+    borderWidth: 1,
+    borderColor: "rgba(63, 221, 144, 0.55)",
+    paddingHorizontal: 16,
+    alignItems: "center",
+  },
+  top3InfoSpacer: {
+    width: 28,
+    height: 28,
+  },
+  top3ActionLabel: {
+    flex: 1,
+    minWidth: 0,
+    height: "100%",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  top3ActionText: {
+    color: AppColors.primaryGreen,
+    fontSize: 12,
+    textAlign: "center",
+    flexShrink: 1,
+  },
+  top3InfoButton: {
+    width: 24,
+    height: 24,
+    borderRadius: 7,
+    backgroundColor: "transparent",
+    borderWidth: 1,
+    borderColor: "rgba(63, 221, 144, 0.75)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  top3InfoButtonText: {
+    color: AppColors.primaryGreen,
+    fontSize: 13,
+    fontWeight: "900",
+    top: -0.5,
   },
   infoButton: {
     width: 44,
@@ -2327,7 +2786,7 @@ const styles = StyleSheet.create({
   },
   reportActionText: {
     color: AppColors.black,
-    fontSize: 15,
+    fontSize: 13,
     fontWeight: "700",
   },
   reportActionDivider: {
@@ -2338,18 +2797,18 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: AppColors.primaryGreen,
     borderRadius: 18,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
     shadowColor: AppColors.primaryGreen,
     shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.3,
-    shadowRadius: 6,
-    elevation: 3,
+    shadowOpacity: 0.25,
+    shadowRadius: 5,
+    elevation: 2,
   },
   optionButtonText: {
     color: AppColors.primaryGreen,
-    fontSize: 12,
-    fontWeight: "500",
+    fontSize: 11,
+    fontWeight: "600",
   },
   modalOverlay: {
     flex: 1,

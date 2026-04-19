@@ -105,7 +105,6 @@ export async function clearSessionData() {
     AsyncStorage.multiRemove([
       "accessToken",
       "refreshToken",
-      "autoLogin",
       PROFILE_KEY,
       AI_SETTINGS_KEY,
       CREDITS_KEY,

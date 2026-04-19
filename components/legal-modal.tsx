@@ -1,8 +1,5 @@
 import { AppColors } from "@/constants/theme";
-import { useEffect, useMemo, useState } from "react";
 import {
-  Dimensions,
-  Linking,
   Modal,
   Pressable,
   ScrollView,
@@ -17,87 +14,34 @@ type LegalModalProps = {
   title: string;
   onClose: () => void;
   onAgree?: () => void;
-  agreeLabel?: string;
 };
 
-const { height } = Dimensions.get("window");
-const IS_SMALL = height < 740;
+type LineKind = "section" | "question" | "accent" | "body";
 
-const URL_PATTERN = /(https?:\/\/[^\s]+)/g;
+const getLineKind = (line: string): LineKind => {
+  const text = line
+    .replace(/\u200B/g, "")
+    .replace(/\r/g, "")
+    .trim();
 
-function isSectionHeader(line: string) {
-  return /^\d+\./.test(line.trim());
-}
-
-function isQuestionLine(line: string) {
-  return /^Q\d+\./i.test(line.trim());
-}
-
-function renderLineWithLinks(line: string, style: any, key: string) {
-  const parts = line.split(URL_PATTERN).filter(Boolean);
-  if (parts.length <= 1) {
-    return (
-      <Text key={key} allowFontScaling={false} style={style}>
-        {line}
-      </Text>
-    );
+  if (!text) {
+    return "body";
   }
 
-  return (
-    <Text key={key} allowFontScaling={false} style={style}>
-      {parts.map((part, index) => {
-        const isUrl = part.startsWith("http://") || part.startsWith("https://");
-        if (!isUrl) return <Text key={`${key}-t-${index}`}>{part}</Text>;
-        return (
-          <Text
-            key={`${key}-u-${index}`}
-            style={styles.link}
-            onPress={() => Linking.openURL(part)}
-          >
-            {part}
-          </Text>
-        );
-      })}
-    </Text>
-  );
-}
+  if (/^제\s*\d+조/.test(text) || /^\d+\./.test(text)) {
+    return "section";
+  }
 
-function renderDescription(description: string) {
-  return description
-    .trim()
-    .split("\n\n")
-    .map((block, index) => {
-      const lines = block.split("\n").filter(Boolean);
-      const [firstLine, ...restLines] = lines;
-      const section = isSectionHeader(firstLine);
+  if (/^[\-•·]?\s*Q\s*\d+[\.)]/i.test(text)) {
+    return "question";
+  }
 
-      const renderLine = (line: string, lineIndex: number) => {
-        const bullet = line.trim().startsWith("- ");
-        const question = isQuestionLine(line);
-        const style = [
-          bullet ? styles.bullet : styles.paragraph,
-          question ? styles.question : null,
-        ];
-        return renderLineWithLinks(line, style, `${line}-${lineIndex}-${index}`);
-      };
+  if (/^-\s*[^:]+\s*:/.test(text)) {
+    return "accent";
+  }
 
-      return (
-        <View key={`${firstLine}-${index}`} style={styles.section}>
-          {section ? (
-            <>
-              <Text allowFontScaling={false} style={styles.sectionTitle}>
-                {firstLine}
-              </Text>
-              <View style={styles.divider} />
-              {restLines.map(renderLine)}
-            </>
-          ) : (
-            lines.map(renderLine)
-          )}
-        </View>
-      );
-    });
-}
+  return "body";
+};
 
 export function LegalModal({
   description,
@@ -105,60 +49,23 @@ export function LegalModal({
   title,
   onClose,
   onAgree,
-  agreeLabel = "동의합니다",
 }: LegalModalProps) {
-  const [canAgree, setCanAgree] = useState(false);
-  const [contentHeight, setContentHeight] = useState(0);
-  const [layoutHeight, setLayoutHeight] = useState(0);
-
-  useEffect(() => {
-    if (!open) {
-      setCanAgree(false);
-      setContentHeight(0);
-      setLayoutHeight(0);
-    }
-  }, [open]);
-
-  useEffect(() => {
-    if (contentHeight > 0 && layoutHeight > 0 && contentHeight <= layoutHeight) {
-      setCanAgree(true);
-    }
-  }, [contentHeight, layoutHeight]);
-
-  const handleScroll = (event: {
-    nativeEvent: {
-      layoutMeasurement: { height: number };
-      contentOffset: { y: number };
-      contentSize: { height: number };
-    };
-  }) => {
-    const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
-    if (contentSize.height <= layoutMeasurement.height) {
-      setCanAgree(true);
-      return;
-    }
-
-    const padding = 12;
-    if (contentOffset.y + layoutMeasurement.height >= contentSize.height - padding) {
-      setCanAgree(true);
-    }
-  };
-
-  const rendered = useMemo(() => renderDescription(description), [description]);
+  const lines = description.split("\n");
 
   return (
-    <Modal animationType="fade" onRequestClose={onClose} transparent visible={open}>
+    <Modal
+      animationType="fade"
+      onRequestClose={onClose}
+      transparent
+      visible={open}
+    >
       <View style={styles.overlay}>
         <Pressable style={styles.backdrop} onPress={onClose} />
         <View style={styles.card}>
           <View style={styles.header}>
-            <Text allowFontScaling={false} style={styles.title}>
-              {title}
-            </Text>
+            <Text style={styles.title}>{title}</Text>
             <Pressable style={styles.closeButton} onPress={onClose}>
-              <Text allowFontScaling={false} style={styles.closeText}>
-                X
-              </Text>
+              <Text style={styles.closeText}>X</Text>
             </Pressable>
           </View>
 
@@ -166,26 +73,58 @@ export function LegalModal({
             style={styles.scroll}
             contentContainerStyle={styles.content}
             showsVerticalScrollIndicator
-            onScroll={handleScroll}
-            onContentSizeChange={(_, nextHeight) => setContentHeight(nextHeight)}
-            onLayout={(event) => setLayoutHeight(event.nativeEvent.layout.height)}
-            scrollEventThrottle={16}
           >
-            {rendered}
+            <View>
+              {lines.map((line, index) => {
+                const cleaned = line
+                  .replace(/\u200B/g, "")
+                  .replace(/\r/g, "")
+                  .trim();
+                const lineKind = getLineKind(line);
+
+                if (!cleaned) {
+                  return (
+                    <View key={`space-${index}`} style={styles.emptyLine} />
+                  );
+                }
+
+                if (lineKind === "section") {
+                  return (
+                    <View key={`section-${index}`} style={styles.sectionWrap}>
+                      <Text style={styles.sectionText}>{cleaned}</Text>
+                      <View style={styles.sectionDivider} />
+                    </View>
+                  );
+                }
+
+                if (lineKind === "accent") {
+                  return (
+                    <View key={`accent-${index}`} style={styles.accentWrap}>
+                      <Text style={styles.accentText}>{cleaned}</Text>
+                    </View>
+                  );
+                }
+
+                if (lineKind === "question") {
+                  return (
+                    <View key={`question-${index}`} style={styles.questionWrap}>
+                      <Text style={styles.questionText}>{cleaned}</Text>
+                    </View>
+                  );
+                }
+
+                return (
+                  <View key={`body-${index}`} style={styles.bodyWrap}>
+                    <Text style={styles.body}>{cleaned}</Text>
+                  </View>
+                );
+              })}
+            </View>
           </ScrollView>
 
-          {onAgree && canAgree ? (
-            <Pressable
-              style={[
-                styles.agreeButton,
-                canAgree ? styles.agreeButtonActive : styles.agreeButtonDisabled,
-              ]}
-              disabled={!canAgree}
-              onPress={onAgree}
-            >
-              <Text allowFontScaling={false} style={styles.agreeButtonText}>
-                {agreeLabel}
-              </Text>
+          {onAgree ? (
+            <Pressable style={styles.agreeButton} onPress={onAgree}>
+              <Text style={styles.agreeButtonText}>동의</Text>
             </Pressable>
           ) : null}
         </View>
@@ -226,30 +165,31 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 18,
+    marginBottom: 16,
   },
   title: {
     flex: 1,
     color: AppColors.primaryGreen,
-    fontSize: IS_SMALL ? 18 : 20,
+    fontSize: 22,
     fontWeight: "800",
     paddingRight: 12,
   },
   closeButton: {
-    width: 34,
-    height: 34,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: "rgba(63, 221, 144, 0.55)",
-    backgroundColor: "rgba(6, 10, 9, 0.6)",
+    width: 40,
+    height: 40,
+    borderRadius: 15,
+    borderWidth: 1.5,
+    borderColor: "rgba(63, 221, 144, 0.65)",
     alignItems: "center",
     justifyContent: "center",
+    backgroundColor: "rgba(63, 221, 144, 0.08)",
   },
   closeText: {
-    color: AppColors.primaryGreen,
-    fontSize: 16,
+    color: "#42FFB4",
+    fontSize: 20,
     fontWeight: "900",
-    lineHeight: 18,
+    lineHeight: 30,
+    marginTop: -1,
   },
   scroll: {
     flexGrow: 0,
@@ -257,66 +197,64 @@ const styles = StyleSheet.create({
   content: {
     paddingBottom: 10,
   },
-  agreeButton: {
-    height: 46,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: "rgba(63, 221, 144, 0.45)",
-    alignItems: "center",
-    justifyContent: "center",
-    marginTop: 14,
+  emptyLine: {
+    height: 16,
   },
-  agreeButtonActive: {
-    backgroundColor: "rgba(63, 221, 144, 0.18)",
-    borderColor: AppColors.primaryGreen,
+  sectionWrap: {
+    marginTop: 6,
+    marginBottom: 18,
   },
-  agreeButtonDisabled: {
-    backgroundColor: "rgba(255, 255, 255, 0.04)",
-    borderColor: "rgba(255, 255, 255, 0.12)",
-  },
-  agreeButtonText: {
+  sectionText: {
     color: AppColors.white,
-    fontSize: IS_SMALL ? 13 : 14,
-    fontWeight: "700",
-  },
-  section: {
-    marginBottom: 20,
-  },
-  divider: {
-    height: 1,
-    backgroundColor: "rgba(63, 221, 144, 0.22)",
-    marginBottom: 12,
-  },
-  sectionTitle: {
-    color: AppColors.white,
-    fontSize: IS_SMALL ? 16 : 17,
-    fontWeight: "700",
+    fontSize: 17,
+    fontWeight: "800",
     lineHeight: 24,
-    marginBottom: 10,
+    marginBottom: 14,
   },
-  paragraph: {
-    color: AppColors.white,
-    fontSize: IS_SMALL ? 13 : 14,
-    lineHeight: IS_SMALL ? 22 : 24,
-    letterSpacing: -0.2,
+  sectionDivider: {
+    height: 1,
+    backgroundColor: "rgba(63, 221, 144, 0.55)",
+  },
+  accentWrap: {
+    marginTop: 10,
     marginBottom: 8,
   },
-  bullet: {
-    color: "#D8D8D8",
-    fontSize: IS_SMALL ? 13 : 14,
-    lineHeight: IS_SMALL ? 22 : 24,
-    letterSpacing: -0.2,
-    paddingLeft: 6,
-    marginBottom: 6,
-  },
-  question: {
+  accentText: {
     color: AppColors.primaryGreen,
+    fontSize: 17,
     fontWeight: "800",
+    lineHeight: 26,
   },
-  link: {
+  questionWrap: {
+    marginTop: 10,
+    marginBottom: 8,
+  },
+  questionText: {
     color: AppColors.primaryGreen,
-    textDecorationLine: "underline",
+    fontSize: 17,
+    fontWeight: "900",
+    lineHeight: 26,
+  },
+  bodyWrap: {
+    marginBottom: 10,
+  },
+  body: {
+    color: AppColors.white,
+    fontSize: 15,
+    lineHeight: 28,
+    letterSpacing: -0.2,
+  },
+  agreeButton: {
+    marginTop: 16,
+    height: 48,
+    borderRadius: 10,
+    backgroundColor: AppColors.primaryGreen,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  agreeButtonText: {
+    color: AppColors.black,
+    fontSize: 15,
     fontWeight: "700",
   },
 });
-

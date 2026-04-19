@@ -60,7 +60,7 @@ export const API_ENDPOINTS = {
   CURATION_START: `${API_BASE_URL}/api/v1/curation/start`,
   CURATION_SUBMIT: `${API_BASE_URL}/api/v1/curation/submit`,
   CURATION_HISTORY: `${API_BASE_URL}/api/v1/curation/history`,
-  CURATION_REPORT: `${API_BASE_URL}/api/v1/curation/history`,
+  CURATION_REPORT: `${API_BASE_URL}/api/v1/curation`,
   AIQ_STREAM: `${API_BASE_URL}/api/v1/aiq/stream`,
 
   PROFILE_UPDATE: `${API_BASE_URL}/api/user/profile`,

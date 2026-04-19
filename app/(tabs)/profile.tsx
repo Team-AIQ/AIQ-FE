@@ -1,8 +1,8 @@
-﻿import { API_ENDPOINTS } from "@/constants/api";
 import { KeyboardAwareScreen } from "@/components/keyboard-aware-screen";
+import { API_ENDPOINTS } from "@/constants/api";
 import { AppColors } from "@/constants/theme";
-import { clearAuthTokens } from "@/lib/auth-storage";
 import { apiRequest, isApiError } from "@/lib/api-client";
+import { clearAuthTokens } from "@/lib/auth-storage";
 import { clearSessionData, getUserProfile } from "@/lib/user-session";
 import { useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
@@ -42,7 +42,8 @@ export default function ProfileScreen() {
   }, []);
 
   const handleSave = async () => {
-    const isChangingPassword = password.length > 0 || passwordConfirm.length > 0;
+    const isChangingPassword =
+      password.length > 0 || passwordConfirm.length > 0;
 
     if (isChangingPassword && !currentPassword.trim()) {
       Alert.alert("비밀번호 확인", "현재 비밀번호를 입력해 주세요.");
@@ -95,34 +96,38 @@ export default function ProfileScreen() {
   };
 
   const confirmWithdraw = () => {
-    Alert.alert("회원탈퇴", "탈퇴하면 계정과 저장된 정보가 초기화됩니다. 계속할까요?", [
-      { text: "취소", style: "cancel" },
-      {
-        text: "계속",
-        style: "destructive",
-        onPress: async () => {
-          setIsWithdrawing(true);
+    Alert.alert(
+      "회원탈퇴",
+      "탈퇴하면 계정과 저장된 정보가 초기화됩니다. 계속할까요?",
+      [
+        { text: "취소", style: "cancel" },
+        {
+          text: "계속",
+          style: "destructive",
+          onPress: async () => {
+            setIsWithdrawing(true);
 
-          try {
-            await apiRequest(API_ENDPOINTS.ACCOUNT_WITHDRAW, {
-              method: "DELETE",
-              requireAuth: true,
-            });
+            try {
+              await apiRequest(API_ENDPOINTS.ACCOUNT_WITHDRAW, {
+                method: "DELETE",
+                requireAuth: true,
+              });
 
-            await Promise.all([clearAuthTokens(), clearSessionData()]);
-            router.replace("/(auth)/welcome");
-          } catch (error) {
-            if (isApiError(error)) {
-              Alert.alert("회원탈퇴 실패", error.message);
-            } else {
-              Alert.alert("회원탈퇴 실패", "회원탈퇴를 진행할 수 없습니다.");
+              await Promise.all([clearAuthTokens(), clearSessionData()]);
+              router.replace("/(auth)/welcome");
+            } catch (error) {
+              if (isApiError(error)) {
+                Alert.alert("회원탈퇴 실패", error.message);
+              } else {
+                Alert.alert("회원탈퇴 실패", "회원탈퇴를 진행할 수 없습니다.");
+              }
+            } finally {
+              setIsWithdrawing(false);
             }
-          } finally {
-            setIsWithdrawing(false);
-          }
+          },
         },
-      },
-    ]);
+      ],
+    );
   };
 
   return (

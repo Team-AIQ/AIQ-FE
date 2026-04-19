@@ -112,7 +112,10 @@ export default function WelcomeScreen() {
               <Text style={styles.termsText}>
                 회원가입 없이 이용 가능하며 로그인 시{" "}
               </Text>
-              <Text style={styles.termsLink} onPress={() => setLegalType("terms")}>
+              <Text
+                style={styles.termsLink}
+                onPress={() => setLegalType("terms")}
+              >
                 이용약관
               </Text>
               <Text style={styles.termsText}> 및{"\n"}</Text>
