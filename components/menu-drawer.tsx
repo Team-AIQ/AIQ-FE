@@ -146,7 +146,6 @@ export function MenuDrawer({
               </TouchableOpacity>
             </View>
 
-            <Text style={styles.sectionTitle}>최근 채팅</Text>
             <ScrollView
               style={[styles.historyList, styles.historyListTight]}
               contentContainerStyle={styles.historyContent}

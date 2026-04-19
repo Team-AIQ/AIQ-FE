@@ -1,7 +1,8 @@
-import { API_ENDPOINTS } from "@/constants/api";
 import { KeyboardAwareScreen } from "@/components/keyboard-aware-screen";
+import { API_ENDPOINTS } from "@/constants/api";
 import { AppColors } from "@/constants/theme";
 import { apiRequest, isApiError } from "@/lib/api-client";
+import * as Clipboard from "expo-clipboard";
 import { useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useEffect, useRef, useState } from "react";
@@ -24,6 +25,7 @@ export default function ForgotPasswordScreen() {
   const router = useRouter();
   const [step, setStep] = useState<Step>("email");
   const [email, setEmail] = useState("");
+  const [resetToken, setResetToken] = useState("");
   const [emailError, setEmailError] = useState("");
   const [code, setCode] = useState(["", "", "", "", "", ""]);
   const [timer, setTimer] = useState(300);
@@ -58,7 +60,8 @@ export default function ForgotPasswordScreen() {
   const isValidEmail = /\S+@\S+\.\S+/.test(email);
 
   const validatePassword = (value: string) => {
-    const regex = /^(?=.*[a-z])(?=.*\d)(?=.*[@$!%*?&#])[A-Za-z\d@$!%*?&#]{8,16}$/;
+    const regex =
+      /^(?=.*[a-z])(?=.*\d)(?=.*[@$!%*?&#])[A-Za-z\d@$!%*?&#]{8,16}$/;
     return regex.test(value);
   };
 
@@ -71,10 +74,14 @@ export default function ForgotPasswordScreen() {
   };
 
   const requestPasswordCode = async () => {
-    await apiRequest(API_ENDPOINTS.PASSWORD_CODE_REQUEST, {
-      method: "POST",
-      body: { email },
-    });
+    await apiRequest(
+      `${API_ENDPOINTS.PASSWORD_CODE_REQUEST}?email=${encodeURIComponent(
+        email.trim(),
+      )}`,
+      {
+        method: "POST",
+      },
+    );
   };
 
   const handleSendCode = async () => {
@@ -111,6 +118,29 @@ export default function ForgotPasswordScreen() {
     setCodeError("");
   };
 
+  const handlePasteCode = async () => {
+    const clipboardText = await Clipboard.getStringAsync();
+    const digits = clipboardText.replace(/\D/g, "").slice(0, 6);
+
+    if (!digits) {
+      setCodeError("클립보드에 붙여넣을 인증코드가 없습니다.");
+      return;
+    }
+
+    const next = digits.split("");
+    while (next.length < 6) next.push("");
+
+    setCode(next);
+    setCodeError("");
+
+    if (digits.length < 6) {
+      codeInputRef.current?.focus();
+      return;
+    }
+
+    Keyboard.dismiss();
+  };
+
   const handleResend = async () => {
     setIsLoading(true);
     setCodeError("");
@@ -138,20 +168,29 @@ export default function ForgotPasswordScreen() {
     setCodeError("");
 
     try {
-      await apiRequest(API_ENDPOINTS.PASSWORD_VERIFY, {
-        method: "POST",
-        body: {
-          email,
-          code: verificationCode,
+      const response = await apiRequest<any>(
+        `${API_ENDPOINTS.PASSWORD_VERIFY}?email=${encodeURIComponent(
+          email.trim(),
+        )}&code=${encodeURIComponent(verificationCode)}`,
+        {
+          method: "POST",
         },
-      });
+      );
+
+      const token =
+        (response as any)?.data ?? (response as any)?.result ?? response;
+
+      if (typeof token !== "string" || !token.trim()) {
+        setCodeError("재설정 토큰을 받지 못했습니다. 다시 시도해 주세요.");
+        return;
+      }
+
+      setResetToken(token);
 
       setStep("reset");
     } catch (error) {
       setCodeError(
-        isApiError(error)
-          ? error.message
-          : "인증 코드가 올바르지 않습니다.",
+        isApiError(error) ? error.message : "인증 코드가 올바르지 않습니다.",
       );
     } finally {
       setIsLoading(false);
@@ -177,6 +216,14 @@ export default function ForgotPasswordScreen() {
   };
 
   const handleResetPassword = async () => {
+    if (!resetToken.trim()) {
+      Alert.alert("오류", "인증 정보가 만료되었습니다. 다시 시도해 주세요.");
+      setStep("email");
+      setCode(["", "", "", "", "", ""]);
+      setTimer(300);
+      return;
+    }
+
     if (!validatePassword(password)) {
       setPasswordError("영문, 숫자, 특수문자를 포함한 8~16자로 입력해 주세요.");
       return;
@@ -190,14 +237,14 @@ export default function ForgotPasswordScreen() {
     setIsLoading(true);
 
     try {
-      await apiRequest(API_ENDPOINTS.PASSWORD_RESET, {
-        method: "POST",
-        body: {
-          email,
-          password,
-          passwordConfirm,
+      await apiRequest(
+        `${API_ENDPOINTS.PASSWORD_RESET}?resetToken=${encodeURIComponent(
+          resetToken,
+        )}&newPassword=${encodeURIComponent(password)}`,
+        {
+          method: "PATCH",
         },
-      });
+      );
 
       Alert.alert("재설정 완료", "새 비밀번호로 다시 로그인해 주세요.", [
         {
@@ -208,9 +255,7 @@ export default function ForgotPasswordScreen() {
     } catch (error) {
       Alert.alert(
         "오류",
-        isApiError(error)
-          ? error.message
-          : "비밀번호 재설정에 실패했습니다.",
+        isApiError(error) ? error.message : "비밀번호 재설정에 실패했습니다.",
       );
     } finally {
       setIsLoading(false);
@@ -264,7 +309,10 @@ export default function ForgotPasswordScreen() {
                 <View style={styles.inputContainer}>
                   <Text style={styles.label}>이메일</Text>
                   <TextInput
-                    style={[styles.input, emailError ? styles.inputError : null]}
+                    style={[
+                      styles.input,
+                      emailError ? styles.inputError : null,
+                    ]}
                     placeholder="이메일을 입력하세요"
                     placeholderTextColor={AppColors.gray}
                     value={email}
@@ -311,6 +359,10 @@ export default function ForgotPasswordScreen() {
                 <TouchableOpacity
                   activeOpacity={1}
                   onPress={() => codeInputRef.current?.focus()}
+                  onLongPress={() => {
+                    void handlePasteCode();
+                  }}
+                  delayLongPress={220}
                 >
                   <View style={styles.codeContainer}>
                     {code.map((digit, index) => (
@@ -334,6 +386,7 @@ export default function ForgotPasswordScreen() {
                   onChangeText={handleCodeInput}
                   keyboardType="number-pad"
                   maxLength={6}
+                  contextMenuHidden={false}
                   autoFocus
                 />
 
@@ -403,6 +456,7 @@ export default function ForgotPasswordScreen() {
                       onBlur={handlePasswordBlur}
                       secureTextEntry={!showPassword}
                       autoCapitalize="none"
+                      contextMenuHidden={false}
                     />
                     <TouchableOpacity
                       style={styles.eyeIcon}
@@ -442,6 +496,7 @@ export default function ForgotPasswordScreen() {
                       onBlur={handlePasswordConfirmBlur}
                       secureTextEntry={!showPasswordConfirm}
                       autoCapitalize="none"
+                      contextMenuHidden={false}
                     />
                     <TouchableOpacity
                       style={styles.eyeIcon}

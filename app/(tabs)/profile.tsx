@@ -3,7 +3,11 @@ import { API_ENDPOINTS } from "@/constants/api";
 import { AppColors } from "@/constants/theme";
 import { apiRequest, isApiError } from "@/lib/api-client";
 import { clearAuthTokens } from "@/lib/auth-storage";
-import { clearSessionData, getUserProfile } from "@/lib/user-session";
+import {
+  clearSessionData,
+  getUserProfile,
+  updateUserProfile,
+} from "@/lib/user-session";
 import { useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useEffect, useState } from "react";
@@ -30,11 +34,41 @@ export default function ProfileScreen() {
   useEffect(() => {
     let mounted = true;
 
-    getUserProfile().then((profile) => {
-      if (!mounted || !profile) return;
-      setNickname(profile.nickname);
-      setEmail(profile.email);
-    });
+    const loadProfile = async () => {
+      const localProfile = await getUserProfile();
+      if (mounted && localProfile) {
+        setNickname(localProfile.nickname);
+        setEmail(localProfile.email);
+      }
+
+      try {
+        const response = await apiRequest<any>(API_ENDPOINTS.PROFILE_UPDATE, {
+          method: "GET",
+          requireAuth: true,
+        });
+        const payload =
+          (response as any)?.data ?? (response as any)?.result ?? response;
+        const serverNickname =
+          (payload as any)?.nickname ?? (payload as any)?.name ?? "";
+        const serverEmail = (payload as any)?.email ?? "";
+
+        if (serverNickname || serverEmail) {
+          await updateUserProfile({
+            nickname: serverNickname || undefined,
+            email: serverEmail || undefined,
+          });
+        }
+
+        if (mounted) {
+          setNickname(serverNickname || localProfile?.nickname || "");
+          setEmail(serverEmail || localProfile?.email || "");
+        }
+      } catch {
+        // Keep local session values when profile sync fails.
+      }
+    };
+
+    void loadProfile();
 
     return () => {
       mounted = false;

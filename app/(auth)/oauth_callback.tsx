@@ -1,5 +1,12 @@
+import { API_ENDPOINTS } from "@/constants/api";
+import { apiRequest } from "@/lib/api-client";
 import { saveAuthTokens } from "@/lib/auth-storage";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import {
+  hasPendingOnboarding,
+  setCredits,
+  updateUserProfile,
+} from "@/lib/user-session";
+import { parseUserSnapshot } from "@/lib/user-snapshot";
 import * as Linking from "expo-linking";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect } from "react";
@@ -18,6 +25,7 @@ export default function OAuthCallbackScreen() {
   useEffect(() => {
     const handleCallback = async () => {
       try {
+        let resolvedEmail = "";
         // params에서 먼저 시도, 없으면 현재 URL에서 파싱
         let accessToken = Array.isArray(params.accessToken)
           ? params.accessToken[0]
@@ -45,10 +53,36 @@ export default function OAuthCallbackScreen() {
 
         await saveAuthTokens(accessToken, refreshToken);
 
-        const onboardingRequired =
-          (await AsyncStorage.getItem("onboarding_required")) === "true";
+        // Fetch actual profile from server after OAuth login
+        try {
+          const profileData = await apiRequest<any>(
+            API_ENDPOINTS.PROFILE_UPDATE,
+            {
+              method: "GET",
+              requireAuth: true,
+            },
+          );
+          const snapshot = parseUserSnapshot(profileData);
+          const serverNickname = snapshot.nickname ?? "";
+          const serverEmail = snapshot.email ?? "";
+          const serverCredits = snapshot.credits;
+          resolvedEmail = serverEmail.trim();
+          await updateUserProfile({
+            nickname: serverNickname || undefined,
+            email: serverEmail || undefined,
+          });
+          if (
+            typeof serverCredits === "number" &&
+            Number.isFinite(serverCredits)
+          ) {
+            await setCredits(serverCredits);
+          }
+        } catch {
+          // Profile fetch failed; proceed with empty profile
+        }
 
-        router.replace(onboardingRequired ? "/(auth)/onboarding" : "/(tabs)");
+        const onboardingPending = await hasPendingOnboarding(resolvedEmail);
+        router.replace(onboardingPending ? "/(auth)/onboarding" : "/(tabs)");
       } catch {
         Alert.alert("로그인 오류", "로그인 처리 중 문제가 발생했습니다.");
         router.replace("/(auth)/welcome");

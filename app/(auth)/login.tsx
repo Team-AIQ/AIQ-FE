@@ -3,7 +3,12 @@ import { API_ENDPOINTS } from "@/constants/api";
 import { AppColors } from "@/constants/theme";
 import { apiRequest, isApiError } from "@/lib/api-client";
 import { saveAuthTokens } from "@/lib/auth-storage";
-import { updateUserProfile } from "@/lib/user-session";
+import {
+  hasPendingOnboarding,
+  setCredits,
+  updateUserProfile,
+} from "@/lib/user-session";
+import { parseUserSnapshot } from "@/lib/user-snapshot";
 import type { LoginResponse } from "@/types/api";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter } from "expo-router";
@@ -111,6 +116,7 @@ export default function LoginScreen() {
     if (!isFormValid || isLoading) return;
 
     setIsLoading(true);
+    let resolvedEmail = email.trim();
 
     console.log("[Login] submitting", {
       endpoint: API_ENDPOINTS.LOGIN,
@@ -136,15 +142,35 @@ export default function LoginScreen() {
 
       await saveAuthTokens(accessToken, refreshToken);
 
-      const externalProfile =
-        (data as any)?.profile ?? (data as any)?.user ?? null;
-      const profileNickname = externalProfile?.nickname || "";
-      const profileEmail = externalProfile?.email || email;
-
-      await updateUserProfile({
-        nickname: profileNickname ? profileNickname : undefined,
-        email: profileEmail,
-      });
+      // Fetch actual profile from server after login
+      try {
+        const profileData = await apiRequest<any>(
+          API_ENDPOINTS.PROFILE_UPDATE,
+          {
+            method: "GET",
+            requireAuth: true,
+          },
+        );
+        const snapshot = parseUserSnapshot(profileData);
+        const serverNickname = snapshot.nickname ?? "";
+        const serverEmail = snapshot.email ?? email;
+        const serverCredits = snapshot.credits;
+        resolvedEmail = serverEmail.trim() || resolvedEmail;
+        await updateUserProfile({
+          nickname: serverNickname || undefined,
+          email: serverEmail,
+        });
+        if (
+          typeof serverCredits === "number" &&
+          Number.isFinite(serverCredits)
+        ) {
+          await setCredits(serverCredits);
+        }
+      } catch {
+        // Fall back to email if server profile fetch fails
+        await updateUserProfile({ email });
+        resolvedEmail = email.trim();
+      }
 
       if (autoLogin) {
         await AsyncStorage.setItem("autoLogin", "true");
@@ -164,10 +190,8 @@ export default function LoginScreen() {
         }
       }
 
-      const onboardingRequired =
-        (await AsyncStorage.getItem("onboarding_required")) === "true";
-
-      router.replace(onboardingRequired ? "/(auth)/onboarding" : "/(tabs)");
+      const onboardingPending = await hasPendingOnboarding(resolvedEmail);
+      router.replace(onboardingPending ? "/(auth)/onboarding" : "/(tabs)");
     } catch (error) {
       console.error("[Login] error", error);
       if (isApiError(error)) {

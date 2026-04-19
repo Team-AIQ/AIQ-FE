@@ -1,3 +1,4 @@
+import type { FinalReportResponse } from "@/types/api";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as SecureStore from "expo-secure-store";
 
@@ -22,6 +23,7 @@ const PROFILE_KEY = "userProfile";
 const AI_SETTINGS_KEY = "aiProviderSettings";
 const CREDITS_KEY = "userCredits";
 const CHAT_HISTORY_KEY = "chatHistory";
+const HISTORY_REPORT_CACHE_KEY = "historyReportCache";
 const ONBOARDING_SEEN_KEY = "onboardingSeenByUser";
 const ONBOARDING_PENDING_KEY = "onboardingPendingByUser";
 
@@ -100,6 +102,29 @@ export async function addChatHistory(title: string) {
   await AsyncStorage.setItem(CHAT_HISTORY_KEY, JSON.stringify(nextHistory));
 }
 
+type HistoryReportCache = Record<string, FinalReportResponse>;
+
+async function getHistoryReportCache() {
+  const raw = await AsyncStorage.getItem(HISTORY_REPORT_CACHE_KEY);
+  if (!raw) return {} as HistoryReportCache;
+
+  return JSON.parse(raw) as HistoryReportCache;
+}
+
+export async function saveHistoryReport(
+  queryId: number,
+  report: FinalReportResponse,
+) {
+  const cache = await getHistoryReportCache();
+  cache[String(queryId)] = report;
+  await AsyncStorage.setItem(HISTORY_REPORT_CACHE_KEY, JSON.stringify(cache));
+}
+
+export async function getHistoryReport(queryId: number) {
+  const cache = await getHistoryReportCache();
+  return cache[String(queryId)] ?? null;
+}
+
 export async function clearSessionData() {
   await Promise.all([
     AsyncStorage.multiRemove([
@@ -109,6 +134,7 @@ export async function clearSessionData() {
       AI_SETTINGS_KEY,
       CREDITS_KEY,
       CHAT_HISTORY_KEY,
+      HISTORY_REPORT_CACHE_KEY,
       ONBOARDING_SEEN_KEY,
       ONBOARDING_PENDING_KEY,
       "currentReportSession",
@@ -121,7 +147,10 @@ export async function clearSessionData() {
 type OnboardingSeenMap = Record<string, boolean>;
 
 function getOnboardingUserKey(userKey?: string) {
-  if (userKey && userKey.trim()) return userKey.trim();
+  if (userKey && userKey.trim()) {
+    const normalized = userKey.trim();
+    return normalized.includes("@") ? normalized.toLowerCase() : normalized;
+  }
   return "anonymous";
 }
 

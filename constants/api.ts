@@ -63,6 +63,6 @@ export const API_ENDPOINTS = {
   CURATION_REPORT: `${API_BASE_URL}/api/v1/curation`,
   AIQ_STREAM: `${API_BASE_URL}/api/v1/aiq/stream`,
 
-  PROFILE_UPDATE: `${API_BASE_URL}/api/user/profile`,
+  PROFILE_UPDATE: `${API_BASE_URL}/api/users/me`,
   ACCOUNT_WITHDRAW: `${API_BASE_URL}/api/auth/withdraw`,
 };

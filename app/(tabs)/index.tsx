@@ -14,11 +14,15 @@ import {
   getAIProviderSettings,
   getChatHistory,
   getCredits,
+  getHistoryReport,
   getUserProfile,
   saveAIProviderSettings,
+  saveHistoryReport,
   setCredits,
+  updateUserProfile,
   UserProfile,
 } from "@/lib/user-session";
+import { parseUserSnapshot } from "@/lib/user-snapshot";
 import type {
   AiRecommendationResponse,
   ApiResponse,
@@ -82,7 +86,110 @@ const DEFAULT_PROVIDER_SETTINGS: AIProviderSettings = {
   perplexity: true,
 };
 
+function AnimatedDots() {
+  const anim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    anim.setValue(0);
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(anim, {
+          toValue: 1,
+          duration: 1100,
+          useNativeDriver: true,
+        }),
+        Animated.timing(anim, {
+          toValue: 0,
+          duration: 0,
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [anim]);
+
+  const opacity = (index: number) => {
+    const bright = 1;
+    const dim = 0.18;
+    const ranges: Record<number, number[]> = {
+      0: [bright, dim, dim, dim, dim, bright],
+      1: [dim, bright, dim, dim, dim, dim],
+      2: [dim, dim, bright, dim, dim, dim],
+      3: [dim, dim, dim, bright, dim, dim],
+      4: [dim, dim, dim, dim, bright, dim],
+    };
+    return anim.interpolate({
+      inputRange: [0, 0.2, 0.4, 0.6, 0.8, 1],
+      outputRange: ranges[index] ?? ranges[0],
+    });
+  };
+
+  const translateY = (index: number) => {
+    const peak = -2;
+    const rest = 0;
+    const ranges: Record<number, number[]> = {
+      0: [peak, rest, rest, rest, rest, peak],
+      1: [rest, peak, rest, rest, rest, rest],
+      2: [rest, rest, peak, rest, rest, rest],
+      3: [rest, rest, rest, peak, rest, rest],
+      4: [rest, rest, rest, rest, peak, rest],
+    };
+    return anim.interpolate({
+      inputRange: [0, 0.2, 0.4, 0.6, 0.8, 1],
+      outputRange: ranges[index] ?? ranges[0],
+    });
+  };
+
+  const scale = (index: number) => {
+    const peak = 1.65;
+    const rest = 1;
+    const ranges: Record<number, number[]> = {
+      0: [peak, rest, rest, rest, rest, peak],
+      1: [rest, peak, rest, rest, rest, rest],
+      2: [rest, rest, peak, rest, rest, rest],
+      3: [rest, rest, rest, peak, rest, rest],
+      4: [rest, rest, rest, rest, peak, rest],
+    };
+    return anim.interpolate({
+      inputRange: [0, 0.2, 0.4, 0.6, 0.8, 1],
+      outputRange: ranges[index] ?? ranges[0],
+    });
+  };
+
+  return (
+    <>
+      {[0, 1, 2, 3, 4].map((index) => (
+        <Animated.View
+          key={`adot-${index}`}
+          style={[
+            animDotStyles.dot,
+            {
+              opacity: opacity(index),
+              transform: [
+                { translateY: translateY(index) },
+                { scale: scale(index) },
+              ],
+            },
+          ]}
+        />
+      ))}
+    </>
+  );
+}
+
+const animDotStyles = StyleSheet.create({
+  dot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: "#999999",
+    marginHorizontal: 3,
+  },
+});
+
 type ModelKey = "GPT" | "Gemini" | "Perplexity";
+const ALL_MODELS: ModelKey[] = ["GPT", "Gemini", "Perplexity"];
 
 const REPORT_CREATING_MESSAGE =
   "리포트를 생성하고 있어요. 잠시만 기다려 주세요.";
@@ -517,6 +624,36 @@ export default function HomeScreen() {
     await setCredits(value);
   };
 
+  const syncCurrentUserSnapshot = useCallback(async () => {
+    try {
+      const response = await apiRequest<any>(API_ENDPOINTS.PROFILE_UPDATE, {
+        method: "GET",
+        requireAuth: true,
+      });
+      const snapshot = parseUserSnapshot(response);
+      const nextNickname = snapshot.nickname ?? "";
+      const nextEmail = snapshot.email ?? "";
+      const nextCredits = snapshot.credits;
+
+      if (nextNickname || nextEmail) {
+        const nextProfile: UserProfile = {
+          nickname: nextNickname,
+          email: nextEmail,
+        };
+        setProfile(nextProfile);
+        await updateUserProfile(nextProfile);
+      }
+
+      if (typeof nextCredits === "number" && Number.isFinite(nextCredits)) {
+        await syncCredits(nextCredits);
+      }
+
+      return true;
+    } catch {
+      return false;
+    }
+  }, []);
+
   const refreshHistory = useCallback(async () => {
     try {
       const response = await apiRequest<ApiResponse<HistoryResponseItem[]>>(
@@ -604,7 +741,8 @@ export default function HomeScreen() {
     setCreditsState(nextCredits);
     setProviderSettings(nextSettings);
     await refreshHistory();
-  }, [refreshHistory]);
+    await syncCurrentUserSnapshot();
+  }, [refreshHistory, syncCurrentUserSnapshot]);
 
   useFocusEffect(
     useCallback(() => {
@@ -916,12 +1054,23 @@ export default function HomeScreen() {
     ));
   };
 
+  const isModelEnabled = (
+    model: ModelKey,
+    settings: AIProviderSettings = providerSettings,
+  ) => {
+    if (model === "GPT") return settings.chatgpt;
+    if (model === "Gemini") return settings.gemini;
+    return settings.perplexity;
+  };
+
+  const getVisibleModels = (
+    settings: AIProviderSettings = providerSettings,
+  ): ModelKey[] =>
+    ALL_MODELS.filter((model) => isModelEnabled(model, settings));
+
   const getSelectedModels = (): ModelKey[] => {
-    const models: ModelKey[] = [];
-    if (providerSettings.chatgpt) models.push("GPT");
-    if (providerSettings.gemini) models.push("Gemini");
-    if (providerSettings.perplexity) models.push("Perplexity");
-    return models.length > 0 ? models : ["GPT", "Gemini", "Perplexity"];
+    const models = getVisibleModels();
+    return models.length > 0 ? models : ALL_MODELS;
   };
 
   const initializeAnalysisStatus = (models: ModelKey[]) => {
@@ -1319,14 +1468,27 @@ export default function HomeScreen() {
   ) => {
     const nextSettings = { ...providerSettings, [key]: value };
     setProviderSettings(nextSettings);
+    if (openProvider && !isModelEnabled(openProvider, nextSettings)) {
+      setOpenProvider(null);
+    }
     await saveAIProviderSettings(nextSettings);
   };
 
   const handleCreditReward = async () => {
-    const nextValue = credits + 2;
-    await syncCredits(nextValue);
+    const synced = await syncCurrentUserSnapshot();
     setCreditsOpen(false);
-    Alert.alert("크레딧 적립", "광고 시청 보상으로 2 크레딧이 적립되었습니다.");
+    if (synced) {
+      Alert.alert(
+        "크레딧 동기화",
+        "서버의 최신 크레딧을 반영했습니다. 광고 보상은 AdMob 서버 콜백으로 지급됩니다.",
+      );
+      return;
+    }
+
+    Alert.alert(
+      "동기화 실패",
+      "서버와 통신할 수 없어 크레딧을 새로고침하지 못했습니다.",
+    );
   };
 
   const handleLogout = async () => {
@@ -1357,8 +1519,11 @@ export default function HomeScreen() {
   const handleSelectHistory = async (item: HistoryResponseItem) => {
     setIsMenuOpen(false);
     try {
+      const cachedReport = await getHistoryReport(item.queryId);
       const result = await fetchReportByQueryId(item.queryId);
-      if (!result) {
+      const report = cachedReport ?? result?.report ?? null;
+
+      if (!report) {
         Alert.alert("안내", "리포트를 생성하지 않았습니다.");
         return;
       }
@@ -1370,10 +1535,10 @@ export default function HomeScreen() {
       setPendingQueryId(null);
       setIsReportGenerating(false);
       setAnalysisStatus({});
-      setAiResponses(result.aiResponses);
-      setShowTop3((result.report.topProducts?.length ?? 0) > 1);
+      setAiResponses(result?.aiResponses ?? {});
       setIsHistoryReport(true);
-      appendReportMessage(result.report);
+      appendReportMessage(report);
+      setShowTop3((report.topProducts?.length ?? 0) > 1);
       scrollToBottom();
     } catch (error) {
       Alert.alert("안내", "리포트를 생성하지 않았습니다.");
@@ -1407,6 +1572,7 @@ export default function HomeScreen() {
     const isFirstUserMessage = isUser && item.id === firstUserMessageId;
     const hasOptions = !isUser && item.options && item.options.length > 0;
     const showQuestionMeta = item.kind === "question" && item.questionMeta;
+    const visibleModels = getVisibleModels();
 
     return (
       <View
@@ -1448,24 +1614,10 @@ export default function HomeScreen() {
               최적의 답변을 생성하고 있습니다
             </Text>
             <View style={[styles.loadingDots, styles.reportLoadingDots]}>
-              {[0, 1, 2, 3, 4].map((index) => (
-                <Animated.View
-                  key={`report-dot-${index}`}
-                  style={[
-                    styles.loadingDot,
-                    {
-                      opacity: dotOpacity(index),
-                      transform: [
-                        { translateY: dotTranslateY(index) },
-                        { scale: dotScale(index) },
-                      ],
-                    },
-                  ]}
-                />
-              ))}
+              <AnimatedDots />
             </View>
             <View style={styles.providerStatusList}>
-              {(["GPT", "Gemini", "Perplexity"] as ModelKey[]).map((model) => {
+              {visibleModels.map((model) => {
                 const status = analysisStatus[model];
                 const label =
                   model === "GPT"
@@ -1530,7 +1682,9 @@ export default function HomeScreen() {
           </View>
         ) : item.kind === "report" && item.reportData ? (
           <View style={styles.reportCard}>
-            <Text style={styles.reportSectionTitle}>추천 제품 TOP 1</Text>
+            <Text style={styles.reportSectionTitle}>
+              {showTop3 ? "추천 제품 TOP 3" : "추천 제품 TOP 1"}
+            </Text>
             {item.reportData.topProducts &&
             item.reportData.topProducts.length > 0 ? (
               <View style={styles.topProductGroup}>
@@ -1550,6 +1704,11 @@ export default function HomeScreen() {
                       <Text style={styles.topProductPrice}>
                         {product.price}
                       </Text>
+                      {showTop3 ? (
+                        <Text style={styles.productRankLabel}>
+                          추천제품 {product.rank}
+                        </Text>
+                      ) : null}
                       {product.productImage ? (
                         <Image
                           source={{ uri: product.productImage }}
@@ -1619,9 +1778,11 @@ export default function HomeScreen() {
               </View>
             </View>
 
-            <Text style={styles.reportSectionTitle}>AI 답변 보기</Text>
+            {visibleModels.length > 0 ? (
+              <Text style={styles.reportSectionTitle}>AI 답변 보기</Text>
+            ) : null}
             <View style={styles.providerToggleGroup}>
-              {(["GPT", "Gemini", "Perplexity"] as ModelKey[]).map((model) => {
+              {visibleModels.map((model) => {
                 const isOpen = openProvider === model;
                 const label = model === "GPT" ? "Chat GPT" : model;
                 const response = aiResponses[model];
@@ -1885,7 +2046,7 @@ export default function HomeScreen() {
                             : inputAreaHeight) + 24,
                         ) +
                         keyboardHeight +
-                        (isReportGenerating ? 36 : 자0),
+                        (isReportGenerating ? 36 : 0),
                     },
                   ]}
                   contentInset={{ bottom: keyboardHeight }}
@@ -1970,6 +2131,19 @@ export default function HomeScreen() {
                   <TouchableOpacity
                     style={styles.reportActionButton}
                     onPress={async () => {
+                      if (activeReportQueryId && activeReport) {
+                        const historySnapshot: FinalReportResponse = {
+                          ...activeReport,
+                          topProducts: showTop3
+                            ? activeReport.topProducts
+                            : activeReport.topProducts.slice(0, 1),
+                        };
+                        await saveHistoryReport(
+                          activeReportQueryId,
+                          historySnapshot,
+                        );
+                      }
+
                       const first = await refreshHistory();
                       await new Promise((resolve) => setTimeout(resolve, 350));
                       const second = await refreshHistory();
@@ -2152,10 +2326,10 @@ export default function HomeScreen() {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>크레딧</Text>
+            <Text style={styles.modalTitle}>광고로 크레딧 충전</Text>
             <Text style={styles.creditNumber}>{credits} credits</Text>
             <Text style={styles.modalBody}>
-              리포트 생성 시 3 크레딧이 차감됩니다. 광고 보기 버튼으로 2
+              * 리포트 생성 시 3 크레딧이 차감됩니다.{"\n"}광고 보기 버튼으로 2
               크레딧을 적립할 수 있습니다.
             </Text>
             <TouchableOpacity
@@ -2566,6 +2740,12 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "800",
   },
+  productRankLabel: {
+    color: AppColors.primaryGreen,
+    fontSize: 13,
+    fontWeight: "700",
+    marginBottom: 2,
+  },
   topProductPrice: {
     color: AppColors.primaryGreen,
     fontSize: 18,
@@ -2861,8 +3041,8 @@ const styles = StyleSheet.create({
     marginTop: 14,
   },
   modalTextButtonLabel: {
-    color: AppColors.white,
-    fontSize: 14,
+    color: "#F07C7C",
+    fontSize: 12,
   },
   top3ModalOverlay: {
     flex: 1,

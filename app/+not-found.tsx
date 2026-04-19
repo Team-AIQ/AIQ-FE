@@ -1,5 +1,5 @@
 import { getAccessToken } from "@/lib/auth-storage";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import { getUserProfile, hasPendingOnboarding } from "@/lib/user-session";
 import { useRouter } from "expo-router";
 import { useEffect, useRef } from "react";
 import { View } from "react-native";
@@ -16,10 +16,10 @@ export default function NotFoundScreen() {
       hasRedirectedRef.current = true;
 
       const token = await getAccessToken();
-      const onboardingRequired =
-        (await AsyncStorage.getItem("onboarding_required")) === "true";
       if (token) {
-        router.replace(onboardingRequired ? "/(auth)/onboarding" : "/(tabs)");
+        const profile = await getUserProfile();
+        const onboardingPending = await hasPendingOnboarding(profile?.email);
+        router.replace(onboardingPending ? "/(auth)/onboarding" : "/(tabs)");
       } else {
         router.replace("/(auth)/welcome");
       }

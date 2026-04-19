@@ -1,4 +1,5 @@
 import { AppColors } from "@/constants/theme";
+import * as Linking from "expo-linking";
 import {
   Modal,
   Pressable,
@@ -16,7 +17,7 @@ type LegalModalProps = {
   onAgree?: () => void;
 };
 
-type LineKind = "section" | "question" | "accent" | "body";
+type LineKind = "section" | "question" | "body";
 
 const getLineKind = (line: string): LineKind => {
   const text = line
@@ -36,12 +37,21 @@ const getLineKind = (line: string): LineKind => {
     return "question";
   }
 
-  if (/^-\s*[^:]+\s*:/.test(text)) {
-    return "accent";
-  }
-
   return "body";
 };
+
+const URL_REGEX = /(https?:\/\/[^\s]+)/i;
+
+function splitBodyAndUrl(text: string) {
+  const matched = text.match(URL_REGEX);
+  if (!matched || !matched[0]) {
+    return { prefix: text, url: null as string | null };
+  }
+
+  const url = matched[0];
+  const prefix = text.replace(url, "").trimEnd();
+  return { prefix, url };
+}
 
 export function LegalModal({
   description,
@@ -97,14 +107,6 @@ export function LegalModal({
                   );
                 }
 
-                if (lineKind === "accent") {
-                  return (
-                    <View key={`accent-${index}`} style={styles.accentWrap}>
-                      <Text style={styles.accentText}>{cleaned}</Text>
-                    </View>
-                  );
-                }
-
                 if (lineKind === "question") {
                   return (
                     <View key={`question-${index}`} style={styles.questionWrap}>
@@ -113,9 +115,25 @@ export function LegalModal({
                   );
                 }
 
+                const { prefix, url } = splitBodyAndUrl(cleaned);
+
                 return (
                   <View key={`body-${index}`} style={styles.bodyWrap}>
-                    <Text style={styles.body}>{cleaned}</Text>
+                    {url ? (
+                      <Text style={styles.body}>
+                        {prefix ? `${prefix} ` : ""}
+                        <Text
+                          style={styles.linkText}
+                          onPress={() => {
+                            void Linking.openURL(url);
+                          }}
+                        >
+                          {url}
+                        </Text>
+                      </Text>
+                    ) : (
+                      <Text style={styles.body}>{cleaned}</Text>
+                    )}
                   </View>
                 );
               })}
@@ -215,16 +233,6 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: "rgba(63, 221, 144, 0.55)",
   },
-  accentWrap: {
-    marginTop: 10,
-    marginBottom: 8,
-  },
-  accentText: {
-    color: AppColors.primaryGreen,
-    fontSize: 17,
-    fontWeight: "800",
-    lineHeight: 26,
-  },
   questionWrap: {
     marginTop: 10,
     marginBottom: 8,
@@ -243,6 +251,10 @@ const styles = StyleSheet.create({
     fontSize: 15,
     lineHeight: 28,
     letterSpacing: -0.2,
+  },
+  linkText: {
+    color: AppColors.primaryGreen,
+    textDecorationLine: "underline",
   },
   agreeButton: {
     marginTop: 16,
