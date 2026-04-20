@@ -170,7 +170,10 @@ export default function ProfileScreen() {
 
       <View style={styles.container}>
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()}>
+          <TouchableOpacity
+            style={styles.placeholder}
+            onPress={() => router.back()}
+          >
             <Text style={styles.backIcon}>‹</Text>
           </TouchableOpacity>
           <Text style={styles.title}>프로필 설정</Text>
@@ -312,7 +315,7 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   placeholder: {
-    width: 24,
+    width: 40,
   },
   scrollView: {
     flex: 1,

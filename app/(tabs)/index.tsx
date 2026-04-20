@@ -589,6 +589,9 @@ export default function HomeScreen() {
   const [aiResponses, setAiResponses] = useState<
     Record<string, AiRecommendationResponse | null>
   >({});
+  const [failedProductImages, setFailedProductImages] = useState<
+    Record<string, boolean>
+  >({});
   const [showTop3, setShowTop3] = useState(false);
   const [activeReport, setActiveReport] = useState<FinalReportResponse | null>(
     null,
@@ -996,6 +999,7 @@ export default function HomeScreen() {
   const appendReportMessage = (report: FinalReportResponse) => {
     setShowTop3(false);
     setOpenProvider(null);
+    setFailedProductImages({});
     setActiveReport(report);
     suppressAutoScrollRef.current = true;
     setMessages((prev) => {
@@ -1537,6 +1541,15 @@ export default function HomeScreen() {
       setAnalysisStatus({});
       setAiResponses(result?.aiResponses ?? {});
       setIsHistoryReport(true);
+      // 히스토리 첫 질문 메시지 먼저 추가
+      setMessages([
+        {
+          id: `${Date.now()}-history-q`,
+          type: "user",
+          text: item.question,
+          timestamp: new Date(item.createdAt),
+        },
+      ]);
       appendReportMessage(report);
       setShowTop3((report.topProducts?.length ?? 0) > 1);
       scrollToBottom();
@@ -1693,54 +1706,75 @@ export default function HomeScreen() {
                   : item.reportData.topProducts.slice(0, 1)
                 )
                   .sort((a, b) => a.rank - b.rank)
-                  .map((product) => (
-                    <View
-                      key={`${product.productCode}-${product.rank}`}
-                      style={styles.topProductCard}
-                    >
-                      <Text style={styles.topProductName}>
-                        {product.productName}
-                      </Text>
-                      <Text style={styles.topProductPrice}>
-                        {product.price}
-                      </Text>
-                      {showTop3 ? (
-                        <Text style={styles.productRankLabel}>
-                          추천제품 {product.rank}
+                  .map((product) => {
+                    const productImageKey = `${product.productCode}-${product.rank}`;
+                    const imageUri = product.productImage?.trim();
+                    const isImageFailed =
+                      !!failedProductImages[productImageKey];
+                    const showProductImage = !!imageUri && !isImageFailed;
+
+                    return (
+                      <View key={productImageKey} style={styles.topProductCard}>
+                        <Text style={styles.topProductName}>
+                          {product.productName}
                         </Text>
-                      ) : null}
-                      {product.productImage ? (
-                        <Image
-                          source={{ uri: product.productImage }}
-                          style={styles.productImage}
-                          resizeMode="contain"
-                        />
-                      ) : null}
-                      <View style={styles.specsRow}>
-                        {Object.entries(product.specs || {}).map(
-                          ([key, value]) => (
-                            <View
-                              key={`${product.productCode}-${key}`}
-                              style={styles.specChip}
-                            >
-                              <Text style={styles.specChipText}>
-                                {key}: {value}
-                              </Text>
-                            </View>
-                          ),
+                        <Text style={styles.topProductPrice}>
+                          {product.price}
+                        </Text>
+                        {showTop3 ? (
+                          <Text style={styles.productRankLabel}>
+                            추천제품 {product.rank}
+                          </Text>
+                        ) : null}
+                        {showProductImage ? (
+                          <Image
+                            source={{ uri: imageUri }}
+                            style={styles.productImage}
+                            resizeMode="contain"
+                            onError={() => {
+                              setFailedProductImages((prev) => ({
+                                ...prev,
+                                [productImageKey]: true,
+                              }));
+                            }}
+                          />
+                        ) : (
+                          <View style={styles.productImagePlaceholder}>
+                            <Text style={styles.productImagePlaceholderText}>
+                              {isImageFailed
+                                ? "이미지를 불러올 수 없습니다"
+                                : "이미지 없음"}
+                            </Text>
+                          </View>
                         )}
+                        <View style={styles.specsRow}>
+                          {Object.entries(product.specs || {}).map(
+                            ([key, value]) => (
+                              <View
+                                key={`${product.productCode}-${key}`}
+                                style={styles.specChip}
+                              >
+                                <Text style={styles.specChipText}>
+                                  {key}: {value}
+                                </Text>
+                              </View>
+                            ),
+                          )}
+                        </View>
+                        <Text style={styles.topProductReason}>
+                          {product.comparativeAnalysis}
+                        </Text>
+                        <TouchableOpacity
+                          style={styles.buyButton}
+                          onPress={() =>
+                            handleLinkPress(product.lowestPriceLink)
+                          }
+                        >
+                          <Text style={styles.buyButtonText}>구매하러가기</Text>
+                        </TouchableOpacity>
                       </View>
-                      <Text style={styles.topProductReason}>
-                        {product.comparativeAnalysis}
-                      </Text>
-                      <TouchableOpacity
-                        style={styles.buyButton}
-                        onPress={() => handleLinkPress(product.lowestPriceLink)}
-                      >
-                        <Text style={styles.buyButtonText}>구매하기</Text>
-                      </TouchableOpacity>
-                    </View>
-                  ))}
+                    );
+                  })}
               </View>
             ) : (
               <Text style={styles.reportEmptyText}>
@@ -2758,6 +2792,20 @@ const styles = StyleSheet.create({
     height: 190,
     borderRadius: 14,
     backgroundColor: "rgba(0,0,0,0.35)",
+  },
+  productImagePlaceholder: {
+    width: "100%",
+    height: 190,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "rgba(63, 221, 144, 0.2)",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.03)",
+  },
+  productImagePlaceholderText: {
+    color: "rgba(255,255,255,0.35)",
+    fontSize: 13,
   },
   specsRow: {
     flexDirection: "row",

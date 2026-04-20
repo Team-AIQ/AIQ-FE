@@ -38,9 +38,10 @@ export default function OnboardingScreen() {
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const [messages, setMessages] = useState<Message[]>([]);
   const [isTyping, setIsTyping] = useState(true); // AI 메시지 출력 중인지
+  const [finished, setFinished] = useState(false);
   const scrollViewRef = useRef<ScrollView>(null);
 
-  const getProgress = () => step * 25;
+  const getProgress = () => (finished ? 100 : (step - 1) * 25);
 
   const pushAiMessagesSequentially = async (
     texts: string[],
@@ -312,6 +313,7 @@ export default function OnboardingScreen() {
                 isTyping && styles.buttonDisabled,
               ]}
               onPress={() => {
+                setFinished(true);
                 markOnboardingForUser().finally(() => {
                   router.replace("/(tabs)");
                 });
