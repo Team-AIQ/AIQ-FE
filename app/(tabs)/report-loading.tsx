@@ -1,32 +1,28 @@
-import { useRouter, useLocalSearchParams } from "expo-router";
-import { StatusBar } from "expo-status-bar";
-import { useEffect, useState } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  Animated,
-  Dimensions,
-} from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
 import { AppColors } from "@/constants/theme";
-
-const { width, height } = Dimensions.get("window");
+import { getReportSession } from "@/lib/report-session";
+import { useRouter } from "expo-router";
+import { StatusBar } from "expo-status-bar";
+import { useEffect, useRef, useState } from "react";
+import { Animated, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 export default function ReportLoadingScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams();
   const [loadingStep, setLoadingStep] = useState(0);
   const [isComplete, setIsComplete] = useState(false);
-
-  // 로딩 애니메이션
-  const fadeAnim1 = new Animated.Value(0.3);
-  const fadeAnim2 = new Animated.Value(0.3);
-  const fadeAnim3 = new Animated.Value(0.3);
+  const [reportTitle, setReportTitle] = useState("리포트");
+  const fadeAnim1 = useRef(new Animated.Value(0.3)).current;
+  const fadeAnim2 = useRef(new Animated.Value(0.3)).current;
+  const fadeAnim3 = useRef(new Animated.Value(0.3)).current;
 
   useEffect(() => {
-    // 로딩 단계별 메시지 변경
+    let mounted = true;
+
+    getReportSession().then((session) => {
+      if (!mounted || !session) return;
+      setReportTitle(session.categoryName);
+    });
+
     const stepInterval = setInterval(() => {
       setLoadingStep((prev) => {
         if (prev >= 2) {
@@ -34,71 +30,68 @@ export default function ReportLoadingScreen() {
           setIsComplete(true);
           return prev;
         }
+
         return prev + 1;
       });
-    }, 2000);
+    }, 1400);
 
-    // 로딩 애니메이션
     const sequence = Animated.loop(
       Animated.sequence([
         Animated.timing(fadeAnim1, {
           toValue: 1,
-          duration: 500,
+          duration: 450,
           useNativeDriver: true,
         }),
         Animated.timing(fadeAnim2, {
           toValue: 1,
-          duration: 500,
+          duration: 450,
           useNativeDriver: true,
         }),
         Animated.timing(fadeAnim3, {
           toValue: 1,
-          duration: 500,
+          duration: 450,
           useNativeDriver: true,
         }),
         Animated.parallel([
           Animated.timing(fadeAnim1, {
             toValue: 0.3,
-            duration: 500,
+            duration: 450,
             useNativeDriver: true,
           }),
           Animated.timing(fadeAnim2, {
             toValue: 0.3,
-            duration: 500,
+            duration: 450,
             useNativeDriver: true,
           }),
           Animated.timing(fadeAnim3, {
             toValue: 0.3,
-            duration: 500,
+            duration: 450,
             useNativeDriver: true,
           }),
         ]),
-      ])
+      ]),
     );
 
     sequence.start();
 
     return () => {
+      mounted = false;
       clearInterval(stepInterval);
       sequence.stop();
     };
-  }, []);
+  }, [fadeAnim1, fadeAnim2, fadeAnim3]);
 
   const getLoadingMessage = () => {
     switch (loadingStep) {
       case 0:
-        return "리포트 준비중";
+        return `${reportTitle} 조건 정리 중`;
       case 1:
-        return "리포트 생성 중";
+        return "AI 리포트 생성 중";
       case 2:
         return "리포트 생성 완료";
       default:
-        return "리포트 준비중";
+        return "리포트 준비 중";
     }
-  };
-
-  const handleViewReport = () => {
-    router.push("/(tabs)/report-select");
   };
 
   return (
@@ -106,75 +99,38 @@ export default function ReportLoadingScreen() {
       <StatusBar style="light" />
 
       <View style={styles.container}>
-        {/* 뒤로가기 버튼 */}
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => router.back()}
-        >
-          <Text style={styles.backIcon}>←</Text>
+        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+          <Text style={styles.backIcon}>‹</Text>
         </TouchableOpacity>
 
-        {/* 로딩 영역 */}
         <View style={styles.loadingArea}>
           <Text style={styles.loadingTitle}>{getLoadingMessage()}</Text>
 
           <View style={styles.loadingDots}>
-            <Animated.View
-              style={[
-                styles.dot,
-                {
-                  opacity: fadeAnim1,
-                },
-              ]}
-            />
-            <Animated.View
-              style={[
-                styles.dot,
-                {
-                  opacity: fadeAnim2,
-                },
-              ]}
-            />
-            <Animated.View
-              style={[
-                styles.dot,
-                {
-                  opacity: fadeAnim3,
-                },
-              ]}
-            />
+            <Animated.View style={[styles.dot, { opacity: fadeAnim1 }]} />
+            <Animated.View style={[styles.dot, { opacity: fadeAnim2 }]} />
+            <Animated.View style={[styles.dot, { opacity: fadeAnim3 }]} />
           </View>
 
-          {loadingStep === 0 && (
-            <Text style={styles.loadingSubtext}>
-              리포트를 생성 중입니다...
-            </Text>
-          )}
-          {loadingStep === 1 && (
-            <Text style={styles.loadingSubtext}>
-              여러 AI가 제품을 분석하고 있습니다...
-            </Text>
-          )}
-          {loadingStep === 2 && (
-            <Text style={styles.loadingSubtext}>
-              리포트가 준비되었습니다!
-            </Text>
-          )}
+          <Text style={styles.loadingSubtext}>
+            {loadingStep === 0
+              ? "질문과 응답을 바탕으로 조건을 정리하고 있어요."
+              : loadingStep === 1
+                ? "세 가지 AI 관점으로 추천 리포트를 만들고 있어요."
+                : "리포트가 준비됐어요."}
+          </Text>
         </View>
 
-        {/* 하단 버튼 */}
-        {isComplete && (
+        {isComplete ? (
           <View style={styles.buttonArea}>
             <TouchableOpacity
               style={styles.viewButton}
-              onPress={handleViewReport}
+              onPress={() => router.push("/(tabs)/report-select")}
             >
-              <Text style={styles.viewButtonText}>
-                리포트 결과를 확인해 주세요
-              </Text>
+              <Text style={styles.viewButtonText}>리포트 결과 확인하기</Text>
             </TouchableOpacity>
           </View>
-        )}
+        ) : null}
       </View>
     </SafeAreaView>
   );
@@ -204,12 +160,14 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
+    paddingHorizontal: 28,
   },
   loadingTitle: {
     fontSize: 24,
     fontWeight: "600",
     color: AppColors.white,
     marginBottom: 40,
+    textAlign: "center",
   },
   loadingDots: {
     flexDirection: "row",
@@ -225,6 +183,8 @@ const styles = StyleSheet.create({
   loadingSubtext: {
     fontSize: 14,
     color: AppColors.gray,
+    textAlign: "center",
+    lineHeight: 22,
   },
   buttonArea: {
     paddingHorizontal: 24,

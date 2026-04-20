@@ -1,20 +1,29 @@
+import MatrixBackground from "@/components/MatrixBackground";
+import StarfieldBackground from "@/components/starfield-background";
+import { AppColors } from "@/constants/theme";
+import { getAccessToken } from "@/lib/auth-storage";
+import {
+  clearPendingOnboarding,
+  getUserProfile,
+  markOnboardingSeen,
+} from "@/lib/user-session";
 import { useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { useState, useRef, useEffect } from "react";
+import { jwtDecode } from "jwt-decode";
+import { useEffect, useRef, useState } from "react";
 import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
   Dimensions,
-  ScrollView,
   Image,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { AppColors } from "@/constants/theme";
-import MatrixBackground from "@/components/MatrixBackground";
 
 const { width, height } = Dimensions.get("window");
+const IS_SMALL = height < 740;
 
 type Message = {
   id: string;
@@ -33,7 +42,10 @@ export default function OnboardingScreen() {
 
   const getProgress = () => step * 25;
 
-  const pushAiMessagesSequentially = async (texts: string[], currentStep: number) => {
+  const pushAiMessagesSequentially = async (
+    texts: string[],
+    currentStep: number,
+  ) => {
     setIsTyping(true);
     for (let i = 0; i < texts.length; i++) {
       await new Promise((resolve) => setTimeout(resolve, 900));
@@ -52,12 +64,15 @@ export default function OnboardingScreen() {
   };
 
   useEffect(() => {
-    pushAiMessagesSequentially([
-      "만나서 반가워 지구인!",
-      "나는 AIQ 행성에서 온 Pickle(피클)이라고 해.🛸",
-      "지구에는 없는 '워프쇼핑'을 알려주려고 멀리서 날아왔어.",
-      "지구인의 '시간'이라는 귀한 자원을 아껴줄 AIQ 방식을 소개해 줄게!",
-    ], 1);
+    pushAiMessagesSequentially(
+      [
+        "만나서 반가워 지구인!",
+        "나는 AIQ 행성에서 온 Pickle(피클)이야. 🛸",
+        "지구에는 없는 '워프쇼핑'을 알려주려고 멀리서 날아왔어.",
+        "지구인의 '시간'이라는 귀한 자원을 아껴줄 AIQ 방식을 소개해 줄게!",
+      ],
+      1,
+    );
   }, []);
 
   const handleUserSelect = async (userText: string) => {
@@ -76,29 +91,38 @@ export default function OnboardingScreen() {
     setStep(nextStep);
 
     if (nextStep === 2) {
-      await pushAiMessagesSequentially([
-        "지구인들은 물건 하나 살 때 여러 개의 탭을 띄우고 몇 시간씩 비교한다며?😵‍💫",
-        "우리 행성에서는 그걸 '선향적 노동'이라고 불러.",
-        "검색하고, 대조하고, 망설이는 비효율적인 시간 말이야.",
-        "혹시 너도 최근에 뭘 살지 고민하느라 에너지를 낭비한 적 있어?",
-      ], 2);
+      await pushAiMessagesSequentially(
+        [
+          "지구인들은 물건 하나 살 때 여러 개의 탭을 띄우고 몇 시간씩 비교한다며?😵‍💫",
+          "우리 행성에선 그걸 '선향적 노동'이라고 불러.",
+          "검색하고, 대조하고, 망설이는 비효율적인 시간 말이야.",
+          "혹시 너도 최근에 뭘 살지 고민하느라 에너지를 낭비한 적 있어?",
+        ],
+        2,
+      );
     }
 
     if (nextStep === 3) {
-      await pushAiMessagesSequentially([
-        "그 시간을 짧게 압축시켜 주는 게 바로 워프쇼핑이야!⚡",
-        "네가 필요한 제품에 대한 질문을 던지면",
-        "내가 GPT, Perplexity, Gemini의 답변을 불러 모을거야.",
-        "너는 거기에 답만 하면 끝이야!",
-      ], 3);
+      await pushAiMessagesSequentially(
+        [
+          "그 시간을 짧게 압축시켜 주는 게 바로 워프쇼핑이야!⚡",
+          "네가 필요한 제품에 대한 질문을 던지면",
+          "내가 GPT, Perplexity, Gemini의 답변을 불러 모을거야.",
+          "너는 거기에 답만 하면 끝이야!",
+        ],
+        3,
+      );
     }
 
     if (nextStep === 4) {
-      await pushAiMessagesSequentially([
-        "응! 분석이 끝나면 AI들의 합의점과 추천 제품을 담은 리포트를 보낼거야.",
-        "이제 더 이상 망설임 없이 '확신'만 남을 거야.",
-        "자, 준비됐어? 네 장바구니 속 고민을 나에게 보여줄래?",
-      ], 4);
+      await pushAiMessagesSequentially(
+        [
+          "응! 분석이 끝나면 AI들의 합의점과 추천 제품을 담은 리포트를 보낼거야.",
+          "이제 더 이상 망설임 없이 '확신'만 남을 거야.",
+          "자, 준비됐어? 네 장바구니 속 고민을 나에게 보여줄래?",
+        ],
+        4,
+      );
     }
   };
 
@@ -106,8 +130,41 @@ export default function OnboardingScreen() {
     scrollViewRef.current?.scrollToEnd({ animated: true });
   }, [messages]);
 
+  const markOnboardingForUser = async () => {
+    try {
+      const accessToken = await getAccessToken();
+      const decoded = accessToken
+        ? jwtDecode<Record<string, unknown>>(accessToken)
+        : {};
+      const userIdKey = (decoded.userId as number | undefined)?.toString();
+      const emailKey = decoded.email as string | undefined;
+      const profile = await getUserProfile();
+      const profileEmail = profile?.email;
+
+      if (userIdKey) {
+        await markOnboardingSeen(userIdKey);
+        await clearPendingOnboarding(userIdKey);
+      }
+      if (emailKey) {
+        await markOnboardingSeen(emailKey);
+        await clearPendingOnboarding(emailKey);
+      }
+      if (profileEmail) {
+        await markOnboardingSeen(profileEmail);
+        await clearPendingOnboarding(profileEmail);
+      }
+      if (!userIdKey && !emailKey && !profileEmail) {
+        await markOnboardingSeen();
+      }
+    } catch {
+      await markOnboardingSeen();
+    }
+  };
+
   const handleSkip = () => {
-    router.replace("/(tabs)");
+    markOnboardingForUser().finally(() => {
+      router.replace("/(tabs)");
+    });
   };
 
   return (
@@ -115,6 +172,7 @@ export default function OnboardingScreen() {
       <StatusBar style="light" />
 
       <View style={styles.container}>
+        <StarfieldBackground density={0.00022} maxOpacity={0.75} />
         {/* 매트릭스 배경 (이미지 없으면 검정 배경) */}
         <View style={styles.matrixBackground} />
 
@@ -178,9 +236,18 @@ export default function OnboardingScreen() {
         {/* 하단 버튼 영역 */}
         <View style={styles.buttonArea}>
           {step === 1 && (
-            <View style={styles.buttonRow}>
+            <View
+              style={[
+                styles.buttonRow,
+                IS_SMALL ? styles.buttonRowStack : null,
+              ]}
+            >
               <TouchableOpacity
-                style={[styles.button, styles.primaryButton, isTyping && styles.buttonDisabled]}
+                style={[
+                  styles.button,
+                  styles.primaryButton,
+                  isTyping && styles.buttonDisabled,
+                ]}
                 onPress={() => handleUserSelect("워프쇼핑이 뭐야?")}
                 disabled={isTyping}
               >
@@ -188,7 +255,11 @@ export default function OnboardingScreen() {
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={[styles.button, styles.secondaryButton, isTyping && styles.buttonDisabled]}
+                style={[
+                  styles.button,
+                  styles.secondaryButton,
+                  isTyping && styles.buttonDisabled,
+                ]}
                 onPress={() => handleUserSelect("응! 어서 알려줘")}
                 disabled={isTyping}
               >
@@ -199,7 +270,11 @@ export default function OnboardingScreen() {
 
           {step === 2 && (
             <TouchableOpacity
-              style={[styles.button, styles.fullButton, isTyping && styles.buttonDisabled]}
+              style={[
+                styles.button,
+                styles.fullButton,
+                isTyping && styles.buttonDisabled,
+              ]}
               onPress={() =>
                 handleUserSelect("있어, 비교하는 게 너무 귀찮고 힘들었어.")
               }
@@ -213,7 +288,11 @@ export default function OnboardingScreen() {
 
           {step === 3 && (
             <TouchableOpacity
-              style={[styles.button, styles.fullButton, isTyping && styles.buttonDisabled]}
+              style={[
+                styles.button,
+                styles.fullButton,
+                isTyping && styles.buttonDisabled,
+              ]}
               onPress={() =>
                 handleUserSelect("오, 여러 AI 의견을 한 번에 정리해 주는구나!")
               }
@@ -227,8 +306,16 @@ export default function OnboardingScreen() {
 
           {step === 4 && (
             <TouchableOpacity
-              style={[styles.button, styles.fullButton, isTyping && styles.buttonDisabled]}
-              onPress={() => router.replace("/(tabs)")}
+              style={[
+                styles.button,
+                styles.fullButton,
+                isTyping && styles.buttonDisabled,
+              ]}
+              onPress={() => {
+                markOnboardingForUser().finally(() => {
+                  router.replace("/(tabs)");
+                });
+              }}
               disabled={isTyping}
             >
               <Text style={styles.fullButtonText}>좋아, 바로 시작할게!</Text>
@@ -357,8 +444,8 @@ const styles = StyleSheet.create({
   aiMessageText: {
     color: AppColors.white,
     fontFamily: "Galmuri9",
-    fontSize: 12,
-    lineHeight: 18,
+    fontSize: IS_SMALL ? 11 : 12,
+    lineHeight: IS_SMALL ? 18 : 20,
   },
   userMessageContainer: {
     marginBottom: 12,
@@ -380,9 +467,9 @@ const styles = StyleSheet.create({
   },
   userMessageText: {
     color: AppColors.black,
-    fontSize: 13,
+    fontSize: IS_SMALL ? 12 : 13,
     fontWeight: "600",
-    lineHeight: 18,
+    lineHeight: IS_SMALL ? 18 : 20,
   },
   buttonArea: {
     paddingHorizontal: 20,
@@ -394,13 +481,18 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 12,
   },
+  buttonRowStack: {
+    flexDirection: "column",
+  },
   button: {
-    height: 52,
+    minHeight: 56,
     borderRadius: 28,
     justifyContent: "center",
     alignItems: "center",
     borderWidth: 1,
     borderColor: AppColors.primaryGreen,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
     // 네온 효과 강화
     shadowColor: AppColors.primaryGreen,
     shadowOffset: { width: 0, height: 0 },
@@ -414,8 +506,10 @@ const styles = StyleSheet.create({
   },
   primaryButtonText: {
     color: AppColors.black,
-    fontSize: 13,
+    fontSize: IS_SMALL ? 11 : 13,
     fontWeight: "700",
+    lineHeight: IS_SMALL ? 18 : 20,
+    textAlign: "center",
   },
   secondaryButton: {
     flex: 1,
@@ -423,8 +517,10 @@ const styles = StyleSheet.create({
   },
   secondaryButtonText: {
     color: AppColors.black,
-    fontSize: 13,
+    fontSize: IS_SMALL ? 11 : 13,
     fontWeight: "700",
+    lineHeight: IS_SMALL ? 18 : 20,
+    textAlign: "center",
   },
   fullButton: {
     width: "100%",
@@ -432,8 +528,10 @@ const styles = StyleSheet.create({
   },
   fullButtonText: {
     color: AppColors.black,
-    fontSize: 13,
+    fontSize: IS_SMALL ? 11 : 13,
     fontWeight: "600",
+    lineHeight: IS_SMALL ? 18 : 20,
+    textAlign: "center",
   },
   buttonDisabled: {
     opacity: 0.5,

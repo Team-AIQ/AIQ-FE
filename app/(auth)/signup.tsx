@@ -1,16 +1,24 @@
+﻿import { KeyboardAwareScreen } from "@/components/keyboard-aware-screen";
+import { LegalModal } from "@/components/legal-modal";
 import { API_ENDPOINTS } from "@/constants/api";
+import { PRIVACY_POLICY } from "@/constants/legal";
 import { AppColors } from "@/constants/theme";
-import { useRouter } from "expo-router";
+import { apiRequest, isApiError } from "@/lib/api-client";
+import {
+  saveUserProfile,
+  setCredits,
+  setPendingOnboarding,
+} from "@/lib/user-session";
+import * as Linking from "expo-linking";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
   Dimensions,
   Image,
-  KeyboardAvoidingView,
   Platform,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -21,6 +29,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 const { width, height } = Dimensions.get("window");
 
+type EmailStatus = "idle" | "sending" | "sent" | "verified";
+
 export default function SignupScreen() {
   const router = useRouter();
   const [nickname, setNickname] = useState("");
@@ -30,125 +40,191 @@ export default function SignupScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [showPasswordConfirm, setShowPasswordConfirm] = useState(false);
   const [agreeTerms, setAgreeTerms] = useState(false);
-
-  // 에러 상태
   const [nicknameError, setNicknameError] = useState("");
   const [emailError, setEmailError] = useState("");
   const [passwordError, setPasswordError] = useState("");
   const [passwordConfirmError, setPasswordConfirmError] = useState("");
-
-
-  // 로딩 상태
+  const [emailStatus, setEmailStatus] = useState<EmailStatus>("idle");
+  const [emailStatusMessage, setEmailStatusMessage] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [legalOpen, setLegalOpen] = useState(false);
+  const searchParams = useLocalSearchParams<{
+    email?: string;
+    verified?: string;
+  }>();
 
-  // 비밀번호 유효성 검사 (영문 소문자, 숫자, 특수문자 포함 8-16자)
-  const validatePassword = (pwd: string) => {
-    const regex = /^(?=.*[a-z])(?=.*\d)(?=.*[@$!%*?&])[a-z\d@$!%*?&]{8,16}$/;
-    return regex.test(pwd);
+  const isValidEmail = /\S+@\S+\.\S+/.test(email);
+  const originParam = Platform.OS === "web" ? "web" : "app";
+
+  const validatePassword = (value: string) => {
+    const regex = /^(?=.*[a-z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,16}$/;
+    return regex.test(value);
   };
-
 
   const handlePasswordBlur = () => {
     if (password && !validatePassword(password)) {
-      setPasswordError("영문 소문자, 숫자, 특수문자 포함 8-16자");
-    } else {
-      setPasswordError("");
+      setPasswordError("영문, 숫자, 특수문자를 포함한 8~16자로 입력해 주세요.");
+      return;
     }
+
+    setPasswordError("");
   };
 
   const handlePasswordConfirmBlur = () => {
     if (passwordConfirm && password !== passwordConfirm) {
-      setPasswordConfirmError("비밀번호가 일치하지 않습니다");
-    } else {
-      setPasswordConfirmError("");
+      setPasswordConfirmError("비밀번호가 일치하지 않습니다.");
+      return;
+    }
+
+    setPasswordConfirmError("");
+  };
+
+  const handleSendVerification = async () => {
+    if (!isValidEmail) {
+      setEmailError("올바른 이메일을 입력해 주세요.");
+      return;
+    }
+
+    setEmailError("");
+    setEmailStatus("sending");
+    setEmailStatusMessage("");
+
+    try {
+      const requestUrl = `${API_ENDPOINTS.EMAIL_REQUEST}?email=${encodeURIComponent(
+        email.trim(),
+      )}&origin=${originParam}`;
+
+      await apiRequest(requestUrl, {
+        method: "POST",
+      });
+
+      setEmailStatus("sent");
+      setEmailStatusMessage(
+        "인증 메일을 발송했습니다. 메일의 링크를 확인해 주세요.",
+      );
+    } catch (error) {
+      setEmailStatus("idle");
+      setEmailError(
+        isApiError(error) ? error.message : "인증 메일 발송에 실패했습니다.",
+      );
     }
   };
 
-  // 폼 유효성 검사
-  const isFormValid =
-    nickname &&
-    email &&
-    password &&
-    passwordConfirm &&
-    validatePassword(password) &&
-    password === passwordConfirm &&
-    agreeTerms;
+  const handleConfirmVerification = () => {
+    if (emailStatus === "verified") {
+      setEmailStatusMessage("이메일 인증이 완료되었습니다.");
+      return;
+    }
 
-  const handleSignup = async () => {
-    // 디버그: 폼 유효성 상태 확인
-    console.log("Form validation:", {
-      nickname: !!nickname,
-      email: !!email,
-      password: !!password,
-      passwordConfirm: !!passwordConfirm,
-      validatePassword: validatePassword(password),
-      passwordMatch: password === passwordConfirm,
-      agreeTerms,
-      isFormValid,
+    Alert.alert(
+      "인증 확인",
+      "이메일에 온 인증 링크를 눌러 주세요. 앱으로 돌아오면 자동으로 인증됩니다.",
+    );
+  };
+
+  useEffect(() => {
+    const handleUrl = (url: string) => {
+      const parsed = Linking.parse(url);
+      const path = parsed.path ?? "";
+
+      if (path === "signup-success" || url.startsWith("aiq://signup-success")) {
+        const emailFromLink =
+          typeof parsed.queryParams?.email === "string"
+            ? parsed.queryParams.email
+            : "";
+
+        if (emailFromLink) {
+          setEmail(emailFromLink);
+        }
+
+        setEmailStatus("verified");
+        setEmailStatusMessage("이메일 인증이 완료되었습니다.");
+      }
+    };
+
+    const subscription = Linking.addEventListener("url", ({ url }) => {
+      handleUrl(url);
     });
 
+    Linking.getInitialURL().then((url) => {
+      if (url) handleUrl(url);
+    });
+
+    return () => subscription.remove();
+  }, []);
+
+  useEffect(() => {
+    if (!searchParams) return;
+
+    const verifiedParam = searchParams.verified;
+    const emailParam = searchParams.email;
+
+    if (typeof emailParam === "string" && emailParam) {
+      setEmail(emailParam);
+    }
+
+    if (verifiedParam === "1" || verifiedParam === "true") {
+      setEmailStatus("verified");
+      setEmailStatusMessage("이메일 인증이 완료되었습니다.");
+    }
+  }, [searchParams]);
+
+  const isFormValid =
+    nickname.trim().length > 0 &&
+    isValidEmail &&
+    password.length > 0 &&
+    passwordConfirm.length > 0 &&
+    validatePassword(password) &&
+    password === passwordConfirm &&
+    agreeTerms &&
+    emailStatus === "verified";
+
+  const handleSignup = async () => {
     if (!isFormValid) {
-      Alert.alert("입력 확인", "모든 항목을 올바르게 입력해주세요.");
+      Alert.alert("입력 확인", "모든 항목을 올바르게 입력해 주세요.");
       return;
     }
 
     setIsLoading(true);
 
     try {
-      console.log("Signup API 호출:", API_ENDPOINTS.SIGNUP);
-      const response = await fetch(API_ENDPOINTS.SIGNUP, {
+      await apiRequest(API_ENDPOINTS.SIGNUP, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
+        body: {
           email,
           password,
           nickname,
-        }),
+        },
       });
 
-      console.log("Response status:", response.status);
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.log("Error response:", errorText);
-        // 이메일 중복 에러 표시
-        setEmailError("이미 사용 중인 이메일입니다");
-        setIsLoading(false);
-        return;
-      }
-
-      // 회원가입 성공
-      Alert.alert("회원가입 성공", "로그인 화면으로 이동합니다.", [
-        {
-          text: "확인",
-          onPress: () => router.replace("/(auth)/login"),
-        },
-      ]);
+      await saveUserProfile({
+        nickname: nickname.trim(),
+        email: email.trim(),
+      });
+      await setCredits(20);
+      await setPendingOnboarding(email.trim());
+      router.replace("/(auth)/login");
     } catch (error) {
-      console.error("Signup error:", error);
-      Alert.alert("오류", "서버와 연결할 수 없습니다.");
+      if (isApiError(error)) {
+        setEmailError(error.message);
+      } else {
+        Alert.alert("오류", "서버에 연결할 수 없습니다.");
+      }
     } finally {
       setIsLoading(false);
     }
-  };
-
-  const handleProfileImageUpload = () => {
-    // TODO: 이미지 업로드 구현
-    console.log("프로필 이미지 업로드");
   };
 
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar style="light" />
 
-      <KeyboardAvoidingView
+      <KeyboardAwareScreen
         style={styles.container}
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        contentContainerStyle={styles.scrollContent}
+        lockScrollWhenKeyboardHidden
         keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 20}
       >
-        {/* 뒤로가기 버튼 */}
         <TouchableOpacity
           style={styles.backButton}
           onPress={() => router.back()}
@@ -159,197 +235,219 @@ export default function SignupScreen() {
           />
         </TouchableOpacity>
 
-        <ScrollView
-          style={styles.scrollView}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-          contentContainerStyle={{ paddingBottom: 50 }}
-        >
-          {/* 헤더 */}
-          <View style={styles.header}>
-            <Text style={styles.title}></Text>
-          </View>
-
-          {/* 프로필 이미지 */}
-          <View style={styles.profileImageContainer}>
-            <View style={styles.profileImageCircle}>
-              <View style={styles.profileIcon}>
-                <Text style={styles.profileIconText}>👤</Text>
-              </View>
-            </View>
-          </View>
-
-          {/* 닉네임 입력 */}
-          <View style={styles.inputContainer}>
-            <Text style={styles.label}>닉네임</Text>
-            <TextInput
-              style={[
-                styles.input,
-                nicknameError && styles.inputError,
-              ]}
-              placeholder="최소 1회 설정 후 변경 불가"
-              placeholderTextColor={AppColors.gray}
-              value={nickname}
-              onChangeText={(text) => {
-                setNickname(text);
-                setNicknameError("");
-              }}
+        <View style={styles.profileImageContainer}>
+          <View style={styles.profileImageCircle}>
+            <Image
+              source={require("../../assets/images/hello-pickle.png")}
+              style={styles.profileImage}
+              resizeMode="contain"
             />
-            {nicknameError ? (
-              <Text style={styles.errorText}>{nicknameError}</Text>
-            ) : null}
           </View>
+        </View>
 
-          {/* 이메일 입력 */}
-          <View style={styles.inputContainer}>
-            <Text style={styles.label}>이메일</Text>
+        <View style={styles.inputContainer}>
+          <Text style={styles.label}>이메일</Text>
+          <View style={styles.inputWithButton}>
             <TextInput
               style={[
                 styles.input,
-                emailError && styles.inputError,
+                styles.inputWithButtonField,
+                emailError ? styles.inputError : null,
+                emailStatus === "verified" ? styles.verifiedInput : null,
               ]}
               placeholder="ex. aiq@email.com"
               placeholderTextColor={AppColors.gray}
               value={email}
-              onChangeText={(text) => {
-                setEmail(text);
+              onChangeText={(value) => {
+                setEmail(value);
                 setEmailError("");
+                setEmailStatus("idle");
+                setEmailStatusMessage("");
               }}
               keyboardType="email-address"
               autoCapitalize="none"
               autoComplete="email"
             />
-            {emailError ? (
-              <Text style={styles.errorText}>{emailError}</Text>
-            ) : null}
-          </View>
-
-          {/* 비밀번호 입력 */}
-          <View style={styles.inputContainer}>
-            <Text style={styles.label}>비밀번호</Text>
-            <View style={styles.passwordContainer}>
-              <TextInput
-                style={[
-                  styles.input,
-                  styles.passwordInput,
-                  passwordError && styles.inputError,
-                ]}
-                placeholder="영문 소문자, 숫자, 특수문자 포함 8-16자"
-                placeholderTextColor={AppColors.gray}
-                value={password}
-                onChangeText={(text) => {
-                  setPassword(text);
-                  setPasswordError("");
-                }}
-                onBlur={handlePasswordBlur}
-                secureTextEntry={!showPassword}
-                autoCapitalize="none"
-              />
-              <TouchableOpacity
-                style={styles.eyeIcon}
-                onPress={() => setShowPassword(!showPassword)}
-              >
-                <Image
-                  source={
-                    showPassword
-                      ? require("../../assets/images/password-open.png")
-                      : require("../../assets/images/password-hide.png")
-                  }
-                  style={styles.eyeIconImage}
-                />
-              </TouchableOpacity>
-            </View>
-            {passwordError ? (
-              <Text style={styles.errorText}>{passwordError}</Text>
-            ) : null}
-          </View>
-
-          {/* 비밀번호 확인 */}
-          <View style={styles.inputContainer}>
-            <Text style={styles.label}>비밀번호 확인</Text>
-            <View style={styles.passwordContainer}>
-              <TextInput
-                style={[
-                  styles.input,
-                  styles.passwordInput,
-                  passwordConfirmError && styles.inputError,
-                ]}
-                placeholder="비밀번호를 한 번 더 입력하세요"
-                placeholderTextColor={AppColors.gray}
-                value={passwordConfirm}
-                onChangeText={(text) => {
-                  setPasswordConfirm(text);
-                  setPasswordConfirmError("");
-                }}
-                onBlur={handlePasswordConfirmBlur}
-                secureTextEntry={!showPasswordConfirm}
-                autoCapitalize="none"
-              />
-              <TouchableOpacity
-                style={styles.eyeIcon}
-                onPress={() => setShowPasswordConfirm(!showPasswordConfirm)}
-              >
-                <Image
-                  source={
-                    showPasswordConfirm
-                      ? require("../../assets/images/password-open.png")
-                      : require("../../assets/images/password-hide.png")
-                  }
-                  style={styles.eyeIconImage}
-                />
-              </TouchableOpacity>
-            </View>
-            {passwordConfirmError ? (
-              <Text style={styles.errorText}>{passwordConfirmError}</Text>
-            ) : null}
-          </View>
-
-          {/* 개인정보 이용 동의 */}
-          <TouchableOpacity
-            style={styles.checkboxContainer}
-            onPress={() => setAgreeTerms(!agreeTerms)}
-          >
-            <View
-              style={[styles.checkbox, agreeTerms && styles.checkboxChecked]}
-            >
-              {agreeTerms && <Text style={styles.checkmark}>✓</Text>}
-            </View>
-            <Text style={styles.checkboxLabel}>개인정보 이용 동의</Text>
             <TouchableOpacity
-              style={styles.detailButton}
-              onPress={() => console.log("개인정보 이용 동의 상세")}
+              style={[
+                styles.inputButton,
+                isValidEmail ? styles.inputButtonActive : null,
+              ]}
+              disabled={!isValidEmail || emailStatus === "sending"}
+              onPress={handleSendVerification}
             >
-              <Text style={styles.detailButtonText}>보기</Text>
-            </TouchableOpacity>
-          </TouchableOpacity>
-
-          {/* 회원가입 버튼 */}
-          <TouchableOpacity
-            style={[
-              styles.signupButton,
-              isFormValid && !isLoading && styles.signupButtonActive,
-            ]}
-            onPress={handleSignup}
-            disabled={!isFormValid || isLoading}
-            activeOpacity={0.8}
-          >
-            {isLoading ? (
-              <ActivityIndicator color={AppColors.white} />
-            ) : (
-              <Text
-                style={[
-                  styles.signupButtonText,
-                  isFormValid && styles.signupButtonTextActive,
-                ]}
-              >
-                회원가입
+              <Text style={styles.inputButtonText}>
+                {emailStatus === "sending" ? "발송 중" : "중복확인"}
               </Text>
-            )}
-          </TouchableOpacity>
+            </TouchableOpacity>
+          </View>
+          {emailError ? (
+            <Text style={styles.errorText}>{emailError}</Text>
+          ) : null}
+          {emailStatusMessage ? (
+            <Text
+              style={[
+                styles.statusText,
+                emailStatus === "verified"
+                  ? styles.statusTextSuccess
+                  : undefined,
+              ]}
+            >
+              {emailStatusMessage}
+            </Text>
+          ) : null}
+          {emailStatus === "sent" ? (
+            <TouchableOpacity
+              style={styles.verifyButton}
+              onPress={handleConfirmVerification}
+            >
+              <Text style={styles.verifyButtonText}>인증 확인</Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
 
-          <View style={styles.bottomSpacer} />
-        </ScrollView>
-      </KeyboardAvoidingView>
+        <View style={styles.inputContainer}>
+          <Text style={styles.label}>닉네임</Text>
+          <TextInput
+            style={[styles.input, nicknameError ? styles.inputError : null]}
+            placeholder="최초 1회 설정 후 변경 불가"
+            placeholderTextColor={AppColors.gray}
+            value={nickname}
+            onChangeText={(value) => {
+              setNickname(value);
+              setNicknameError("");
+            }}
+          />
+          {nicknameError ? (
+            <Text style={styles.errorText}>{nicknameError}</Text>
+          ) : null}
+        </View>
+
+        <View style={styles.inputContainer}>
+          <Text style={styles.label}>비밀번호</Text>
+          <View style={styles.passwordContainer}>
+            <TextInput
+              style={[
+                styles.input,
+                styles.passwordInput,
+                passwordError ? styles.inputError : null,
+              ]}
+              placeholder="영문, 숫자, 특수문자를 포함한 8~16자"
+              placeholderTextColor={AppColors.gray}
+              value={password}
+              onChangeText={(value) => {
+                setPassword(value);
+                setPasswordError("");
+              }}
+              onBlur={handlePasswordBlur}
+              secureTextEntry={!showPassword}
+              autoCapitalize="none"
+            />
+            <TouchableOpacity
+              style={styles.eyeIcon}
+              onPress={() => setShowPassword((prev) => !prev)}
+            >
+              <Image
+                source={
+                  showPassword
+                    ? require("../../assets/images/password-open.png")
+                    : require("../../assets/images/password-hide.png")
+                }
+                style={styles.eyeIconImage}
+              />
+            </TouchableOpacity>
+          </View>
+          {passwordError ? (
+            <Text style={styles.errorText}>{passwordError}</Text>
+          ) : null}
+        </View>
+
+        <View style={styles.inputContainer}>
+          <Text style={styles.label}>비밀번호 확인</Text>
+          <View style={styles.passwordContainer}>
+            <TextInput
+              style={[
+                styles.input,
+                styles.passwordInput,
+                passwordConfirmError ? styles.inputError : null,
+              ]}
+              placeholder="비밀번호를 한번 더 입력해 주세요."
+              placeholderTextColor={AppColors.gray}
+              value={passwordConfirm}
+              onChangeText={(value) => {
+                setPasswordConfirm(value);
+                setPasswordConfirmError("");
+              }}
+              onBlur={handlePasswordConfirmBlur}
+              secureTextEntry={!showPasswordConfirm}
+              autoCapitalize="none"
+            />
+            <TouchableOpacity
+              style={styles.eyeIcon}
+              onPress={() => setShowPasswordConfirm((prev) => !prev)}
+            >
+              <Image
+                source={
+                  showPasswordConfirm
+                    ? require("../../assets/images/password-open.png")
+                    : require("../../assets/images/password-hide.png")
+                }
+                style={styles.eyeIconImage}
+              />
+            </TouchableOpacity>
+          </View>
+          {passwordConfirmError ? (
+            <Text style={styles.errorText}>{passwordConfirmError}</Text>
+          ) : null}
+        </View>
+
+        <TouchableOpacity
+          style={styles.checkboxContainer}
+          onPress={() => setLegalOpen(true)}
+        >
+          <View
+            style={[
+              styles.checkbox,
+              agreeTerms ? styles.checkboxChecked : null,
+            ]}
+          >
+            {agreeTerms ? <Text style={styles.checkmark}>✓</Text> : null}
+          </View>
+          <Text style={styles.checkboxLabel}>개인정보 이용에 동의합니다</Text>
+          <TouchableOpacity
+            style={styles.detailButton}
+            onPress={() => setLegalOpen(true)}
+          >
+            <Text style={styles.detailButtonText}>보기</Text>
+          </TouchableOpacity>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[
+            styles.signupButton,
+            isFormValid && !isLoading ? styles.signupButtonActive : null,
+          ]}
+          onPress={handleSignup}
+          disabled={!isFormValid || isLoading}
+        >
+          {isLoading ? (
+            <ActivityIndicator color={AppColors.white} />
+          ) : (
+            <Text style={styles.signupButtonText}>회원가입</Text>
+          )}
+        </TouchableOpacity>
+      </KeyboardAwareScreen>
+
+      <LegalModal
+        description={PRIVACY_POLICY}
+        open={legalOpen}
+        title="개인정보처리방침"
+        onAgree={() => {
+          setAgreeTerms(true);
+          setLegalOpen(false);
+        }}
+        onClose={() => setLegalOpen(false)}
+      />
     </SafeAreaView>
   );
 }
@@ -363,14 +461,11 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: AppColors.black,
   },
-  scrollView: {
-    flex: 1,
-  },
   backButton: {
     position: "absolute",
     top: 30,
-    left: 30,
-    zIndex: 15,
+    left: 20,
+    zIndex: 10,
     padding: 15,
   },
   backIconImage: {
@@ -378,84 +473,90 @@ const styles = StyleSheet.create({
     height: 20,
     tintColor: AppColors.white,
   },
-  logoArea: {
-    alignItems: "center",
-    marginTop: 50,
-    marginBottom: 30,
-  },
-  logo: {
-    width: width * 0.4,
-    height: height * 0.2,
+  scrollContent: {
+    paddingTop: 70,
+    paddingBottom: 50,
+    flexGrow: 1,
   },
   header: {
-    alignItems: "center",
-    marginTop: 20,
-    marginBottom: 30,
+    paddingHorizontal: 43,
+    paddingTop: 90,
+    marginBottom: 20,
   },
   title: {
-    fontSize: 22,
-    fontWeight: "600",
     color: AppColors.white,
+    fontSize: 24,
+    fontWeight: "700",
   },
   profileImageContainer: {
     alignItems: "center",
-    marginBottom: 40,
-    position: "relative",
+    marginBottom: 30,
   },
   profileImageCircle: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    borderWidth: 2,
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    borderWidth: 1.5,
     borderColor: AppColors.white,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: AppColors.black,
   },
-  profileIcon: {
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  profileIconText: {
-    fontSize: 48,
-  },
-  uploadButton: {
-    position: "absolute",
-    bottom: 0,
-    right: width / 2 - 60,
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: AppColors.primaryGreen,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  uploadButtonText: {
-    fontSize: 16,
+  profileImage: {
+    width: 92,
+    height: 92,
   },
   inputContainer: {
-    paddingHorizontal: 40,
-    marginBottom: 20,
+    paddingHorizontal: 43,
+    marginBottom: 18,
   },
   label: {
-    fontSize: 14,
     color: AppColors.white,
+    fontSize: 14,
     marginBottom: 8,
-    fontWeight: "500",
+    fontWeight: "600",
   },
   input: {
-    width: "100%",
-    height: 47,
-    backgroundColor: "transparent",
+    height: 50,
     borderWidth: 1,
     borderColor: AppColors.gray,
     borderRadius: 8,
     paddingHorizontal: 16,
-    fontSize: 13.5,
     color: AppColors.white,
+    fontSize: 14,
   },
   inputError: {
-    borderColor: AppColors.error,
+    borderColor: "#FF6B6B",
+  },
+  verifiedInput: {
+    borderColor: AppColors.primaryGreen,
+  },
+  inputWithButton: {
+    position: "relative",
+  },
+  inputWithButtonField: {
+    paddingRight: 88,
+  },
+  inputButton: {
+    position: "absolute",
+    right: 8,
+    top: 8,
+    height: 34,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: AppColors.gray,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "rgba(10, 10, 10, 0.6)",
+  },
+  inputButtonActive: {
+    borderColor: AppColors.primaryGreen,
+    backgroundColor: "rgba(63, 221, 144, 0.12)",
+  },
+  inputButtonText: {
+    color: AppColors.white,
+    fontSize: 12,
+    fontWeight: "600",
   },
   passwordContainer: {
     position: "relative",
@@ -466,85 +567,97 @@ const styles = StyleSheet.create({
   eyeIcon: {
     position: "absolute",
     right: 12,
-    top: 8.5,
+    top: 10,
     padding: 4,
   },
   eyeIconImage: {
-    width: 24,
-    height: 24,
+    width: 22,
+    height: 22,
     tintColor: AppColors.gray,
   },
   errorText: {
+    color: "#FF6B6B",
     fontSize: 12,
-    color: AppColors.error,
-    marginTop: 6,
+    marginTop: 8,
+    lineHeight: 18,
+  },
+  statusText: {
+    color: AppColors.gray,
+    fontSize: 12,
+    marginTop: 8,
+    lineHeight: 18,
+  },
+  statusTextSuccess: {
+    color: AppColors.primaryGreen,
+  },
+  verifyButton: {
+    alignSelf: "flex-start",
+    marginTop: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: AppColors.primaryGreen,
+  },
+  verifyButtonText: {
+    color: AppColors.primaryGreen,
+    fontSize: 12,
+    fontWeight: "600",
   },
   checkboxContainer: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 40,
-    marginTop: 20, // ⬅️ 추가 (위에서 떨어뜨림)
-    marginBottom: 40, // ⬅️ 기존 32 → 더 여유 주기
+    paddingHorizontal: 43,
+    marginTop: 6,
+    marginBottom: 28,
   },
-
   checkbox: {
     width: 20,
     height: 20,
-    borderWidth: 1.5,
-    borderColor: AppColors.gray,
     borderRadius: 4,
-    marginRight: 8,
+    borderWidth: 1,
+    borderColor: AppColors.gray,
     justifyContent: "center",
     alignItems: "center",
+    marginRight: 10,
   },
   checkboxChecked: {
-    backgroundColor: AppColors.primaryGreen,
     borderColor: AppColors.primaryGreen,
+    backgroundColor: AppColors.primaryGreen,
   },
   checkmark: {
-    color: AppColors.white,
-    fontSize: 14,
-    fontWeight: "bold",
+    color: AppColors.black,
+    fontSize: 12,
+    fontWeight: "700",
   },
   checkboxLabel: {
     flex: 1,
-    fontSize: 14,
     color: AppColors.white,
-  },
-  required: {
-    color: AppColors.error,
+    fontSize: 13,
   },
   detailButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 4,
+    paddingLeft: 8,
   },
   detailButtonText: {
-    fontSize: 13,
     color: AppColors.white,
+    fontSize: 13,
     textDecorationLine: "underline",
   },
   signupButton: {
-    marginHorizontal: 40,
-    marginTop: -25, // ⬅️ 살짝 위로 당김 (핵심)
     height: 52,
-    backgroundColor: AppColors.gray,
+    marginHorizontal: 43,
     borderRadius: 8,
+    backgroundColor: AppColors.gray,
     justifyContent: "center",
     alignItems: "center",
+    marginBottom: 30,
   },
-
   signupButtonActive: {
     backgroundColor: AppColors.primaryGreen,
   },
   signupButtonText: {
+    color: AppColors.white,
     fontSize: 16,
-    fontWeight: "600",
-    color: AppColors.white,
-  },
-  signupButtonTextActive: {
-    color: AppColors.white,
-  },
-  bottomSpacer: {
-    height: 40,
+    fontWeight: "700",
   },
 });

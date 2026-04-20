@@ -1,4 +1,11 @@
-import { useRouter } from "expo-router";
+import {
+  clearAuthTokens,
+  getAccessToken,
+  saveAuthTokens,
+} from "@/lib/auth-storage";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as Linking from "expo-linking";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useEffect, useRef, useState } from "react";
 import { Animated, Dimensions, Image, StyleSheet, View } from "react-native";
@@ -12,14 +19,83 @@ const COLORS = {
 
 export default function SplashScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{
+    accessToken?: string;
+    refreshToken?: string;
+  }>();
+  const hasBootstrappedRef = useRef(false);
 
   /** AIQ 글씨 + 캐릭터 공통 이동 */
   const translateY = useRef(new Animated.Value(-16)).current;
 
   /** 빔 on/off */
   const [showBeam, setShowBeam] = useState(false);
-
   useEffect(() => {
+    const bootstrapAuth = async () => {
+      if (hasBootstrappedRef.current) {
+        return false;
+      }
+      hasBootstrappedRef.current = true;
+
+      let accessToken = Array.isArray(params.accessToken)
+        ? params.accessToken[0]
+        : params.accessToken;
+      let refreshToken = Array.isArray(params.refreshToken)
+        ? params.refreshToken[0]
+        : params.refreshToken;
+
+      if (accessToken && refreshToken) {
+        console.log("[Splash] Params token detected");
+        await saveAuthTokens(accessToken, refreshToken);
+        const onboardingRequired =
+          (await AsyncStorage.getItem("onboarding_required")) === "true";
+        router.replace(onboardingRequired ? "/(auth)/onboarding" : "/(tabs)");
+        return true;
+      }
+
+      const initialUrl = await Linking.getInitialURL();
+      if (initialUrl) {
+        console.log("[Splash] Initial URL", initialUrl);
+        const parsed = Linking.parse(initialUrl);
+        const accessTokenParam = parsed.queryParams?.accessToken;
+        const refreshTokenParam = parsed.queryParams?.refreshToken;
+        accessToken = Array.isArray(accessTokenParam)
+          ? accessTokenParam[0]
+          : accessTokenParam;
+        refreshToken = Array.isArray(refreshTokenParam)
+          ? refreshTokenParam[0]
+          : refreshTokenParam;
+
+        if (accessToken && refreshToken) {
+          await saveAuthTokens(accessToken, refreshToken);
+          const onboardingRequired =
+            (await AsyncStorage.getItem("onboarding_required")) === "true";
+          router.replace(onboardingRequired ? "/(auth)/onboarding" : "/(tabs)");
+          return true;
+        }
+      }
+
+      const autoLoginEnabled =
+        (await AsyncStorage.getItem("autoLogin")) === "true";
+      if (!autoLoginEnabled) {
+        await clearAuthTokens();
+        router.replace("/(auth)/welcome");
+        return false;
+      }
+
+      const token = await getAccessToken();
+      const onboardingRequired =
+        (await AsyncStorage.getItem("onboarding_required")) === "true";
+      router.replace(
+        token
+          ? onboardingRequired
+            ? "/(auth)/onboarding"
+            : "/(tabs)"
+          : "/(auth)/welcome",
+      );
+      return false;
+    };
+
     // 1️⃣ 빔 등장
     const beamTimer = setTimeout(() => {
       setShowBeam(true);
@@ -34,15 +110,15 @@ export default function SplashScreen() {
     }).start();
 
     // 3️⃣ 스플래시 종료
-    const exitTimer = setTimeout(() => {
-      router.replace("/(auth)/welcome");
+    const exitTimer = setTimeout(async () => {
+      await bootstrapAuth();
     }, 2500);
 
     return () => {
       clearTimeout(beamTimer);
       clearTimeout(exitTimer);
     };
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -56,7 +132,7 @@ export default function SplashScreen() {
           <Image
             source={require("../assets/images/aiq-animation-logo.gif")}
             style={styles.beamLogo}
-            contentFit="contain"
+            resizeMode="contain"
           />
         </View>
 
@@ -140,7 +216,7 @@ const styles = StyleSheet.create({
   /* 캐릭터 */
   character: {
     width: width * 0.68,
-    height: height * 0.50,
+    height: height * 0.5,
     marginTop: 10,
     marginBottom: -height * 0.12, // ❗️다리 살짝 가림
   },

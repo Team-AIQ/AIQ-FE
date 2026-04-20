@@ -1,25 +1,48 @@
+import { KeyboardAwareScreen } from "@/components/keyboard-aware-screen";
+import { API_ENDPOINTS } from "@/constants/api";
+import { AppColors } from "@/constants/theme";
+import { apiRequest, isApiError } from "@/lib/api-client";
+import { saveAuthTokens } from "@/lib/auth-storage";
+import {
+  hasPendingOnboarding,
+  setCredits,
+  updateUserProfile,
+} from "@/lib/user-session";
+import { parseUserSnapshot } from "@/lib/user-snapshot";
+import type { LoginResponse } from "@/types/api";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  TextInput,
-  Image,
-  Dimensions,
-  Keyboard,
-  TouchableWithoutFeedback,
   Alert,
-  ActivityIndicator,
+  Animated,
+  Dimensions,
+  Image,
+  Keyboard,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  TouchableWithoutFeedback,
+  View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { AppColors } from "@/constants/theme";
-import { API_ENDPOINTS } from "@/constants/api";
 
 const { width, height } = Dimensions.get("window");
+const STAR_COUNT = 70;
+
+const generateStars = (count: number) =>
+  Array.from({ length: count }, (_, index) => {
+    const seed = index * 9973;
+    const rand = (n: number) => (Math.sin(n) + 1) / 2;
+    return {
+      x: rand(seed) * width,
+      y: rand(seed + 1) * height,
+      size: 1 + rand(seed + 2) * 2.1,
+      opacity: 0.05 + rand(seed + 3) * 0.15,
+    };
+  });
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -27,57 +50,196 @@ export default function LoginScreen() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [autoLogin, setAutoLogin] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const twinkleAnim = useRef(new Animated.Value(0)).current;
+  const stars = useMemo(() => generateStars(STAR_COUNT), []);
+
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(twinkleAnim, {
+          toValue: 1,
+          duration: 2800,
+          useNativeDriver: true,
+        }),
+        Animated.timing(twinkleAnim, {
+          toValue: 0,
+          duration: 2800,
+          useNativeDriver: true,
+        }),
+      ]),
+    ).start();
+  }, [twinkleAnim]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const loadAutoLoginPreference = async () => {
+      const saved = await AsyncStorage.getItem("autoLogin");
+      if (mounted) {
+        setAutoLogin(saved === "true");
+      }
+
+      if (__DEV__) {
+        console.log("[Login] autoLogin loaded", {
+          checked: saved === "true" ? "ON" : "OFF",
+          saved: saved ?? "unset",
+        });
+      }
+    };
+
+    void loadAutoLoginPreference();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const isFormValid = email.length > 0 && password.length > 0;
 
-  const handleLogin = async () => {
-    if (!isFormValid) return;
+  const getTokenValue = (
+    payload: LoginResponse,
+    key: "accessToken" | "refreshToken",
+  ): string | undefined => {
+    const directValue = payload[key];
+    if (typeof directValue === "string" && directValue.length > 0) {
+      return directValue;
+    }
 
+    const nestedValue = payload.data?.[key];
+    return typeof nestedValue === "string" && nestedValue.length > 0
+      ? nestedValue
+      : undefined;
+  };
+
+  const handleLogin = async () => {
+    if (!isFormValid || isLoading) return;
+
+    setIsLoading(true);
+    let resolvedEmail = email.trim();
+
+    console.log("[Login] submitting", {
+      endpoint: API_ENDPOINTS.LOGIN,
+      email,
+      password: password ? "***" : "",
+    });
     try {
-      const response = await fetch(API_ENDPOINTS.LOGIN, {
+      const data = await apiRequest<LoginResponse>(API_ENDPOINTS.LOGIN, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
+        body: {
           email,
           password,
-        }),
+        },
       });
 
-      if (!response.ok) {
-        Alert.alert("로그인 실패", "이메일 또는 비밀번호를 확인해주세요.");
+      const accessToken = getTokenValue(data, "accessToken");
+      const refreshToken = getTokenValue(data, "refreshToken");
+
+      if (!accessToken || !refreshToken) {
+        Alert.alert("로그인 실패", "토큰 응답 형식이 올바르지 않습니다.");
         return;
       }
 
-      const data = await response.json();
-      const { accessToken, refreshToken } = data;
+      await saveAuthTokens(accessToken, refreshToken);
 
-      // 토큰 저장
-      await AsyncStorage.setItem("accessToken", accessToken);
-      await AsyncStorage.setItem("refreshToken", refreshToken);
-
-      // 자동 로그인 선택 시 (선택사항)
-      if (autoLogin) {
-        await AsyncStorage.setItem("autoLogin", "true");
+      // Fetch actual profile from server after login
+      try {
+        const profileData = await apiRequest<any>(
+          API_ENDPOINTS.PROFILE_UPDATE,
+          {
+            method: "GET",
+            requireAuth: true,
+          },
+        );
+        const snapshot = parseUserSnapshot(profileData);
+        const serverNickname = snapshot.nickname ?? "";
+        const serverEmail = snapshot.email ?? email;
+        const serverCredits = snapshot.credits;
+        resolvedEmail = serverEmail.trim() || resolvedEmail;
+        await updateUserProfile({
+          nickname: serverNickname || undefined,
+          email: serverEmail,
+        });
+        if (
+          typeof serverCredits === "number" &&
+          Number.isFinite(serverCredits)
+        ) {
+          await setCredits(serverCredits);
+        }
+      } catch {
+        // Fall back to email if server profile fetch fails
+        await updateUserProfile({ email });
+        resolvedEmail = email.trim();
       }
 
-      // 로그인 성공 → 온보딩 or 메인
-      router.replace("/(auth)/onboarding");
+      if (autoLogin) {
+        await AsyncStorage.setItem("autoLogin", "true");
+        if (__DEV__) {
+          console.log("[Login] autoLogin saved", {
+            checked: "ON",
+            saved: "true",
+          });
+        }
+      } else {
+        await AsyncStorage.removeItem("autoLogin");
+        if (__DEV__) {
+          console.log("[Login] autoLogin saved", {
+            checked: "OFF",
+            saved: "unset",
+          });
+        }
+      }
+
+      const onboardingPending = await hasPendingOnboarding(resolvedEmail);
+      router.replace(onboardingPending ? "/(auth)/onboarding" : "/(tabs)");
     } catch (error) {
-      console.error("Login error:", error);
-      Alert.alert("오류", "서버와 연결할 수 없습니다.");
+      console.error("[Login] error", error);
+      if (isApiError(error)) {
+        Alert.alert("로그인 실패", error.message);
+      } else {
+        Alert.alert("오류", "서버와 연결할 수 없습니다.");
+      }
+    } finally {
+      setIsLoading(false);
     }
   };
-
 
   return (
     <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
       <SafeAreaView style={styles.safeArea}>
         <StatusBar style="light" />
 
-        <View style={styles.container}>
-          {/* 뒤로가기 버튼 */}
+        <View style={styles.spaceBackground} pointerEvents="none">
+          <Animated.View
+            style={[
+              styles.starsLayer,
+              {
+                opacity: twinkleAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [0.55, 0.85],
+                }),
+              },
+            ]}
+          >
+            {stars.map((star, index) => (
+              <View
+                key={`star-${index}`}
+                style={[
+                  styles.star,
+                  {
+                    left: star.x,
+                    top: star.y,
+                    width: star.size,
+                    height: star.size,
+                    opacity: star.opacity,
+                  },
+                ]}
+              />
+            ))}
+          </Animated.View>
+        </View>
+
+        <KeyboardAwareScreen style={styles.container}>
           <TouchableOpacity
             style={styles.backButton}
             onPress={() => router.back()}
@@ -88,7 +250,6 @@ export default function LoginScreen() {
             />
           </TouchableOpacity>
 
-          {/* 로고 영역 */}
           <View style={styles.logoArea}>
             <Image
               source={require("../../assets/images/auth-logo.png")}
@@ -97,9 +258,7 @@ export default function LoginScreen() {
             />
           </View>
 
-          {/* 폼 영역 */}
           <View style={styles.formArea}>
-            {/* 이메일 입력 */}
             <View style={styles.inputContainer}>
               <TextInput
                 style={styles.input}
@@ -113,7 +272,6 @@ export default function LoginScreen() {
               />
             </View>
 
-            {/* 비밀번호 입력 */}
             <View style={styles.inputContainer}>
               <View style={styles.passwordContainer}>
                 <TextInput
@@ -142,11 +300,22 @@ export default function LoginScreen() {
               </View>
             </View>
 
-            {/* 자동 로그인 & 비밀번호 찾기 */}
             <View style={styles.optionsRow}>
               <TouchableOpacity
                 style={styles.checkboxContainer}
-                onPress={() => setAutoLogin(!autoLogin)}
+                onPress={() => {
+                  setAutoLogin((prev) => {
+                    const next = !prev;
+
+                    if (__DEV__) {
+                      console.log("[Login] autoLogin toggled", {
+                        checked: next ? "ON" : "OFF",
+                      });
+                    }
+
+                    return next;
+                  });
+                }}
               >
                 <Image
                   source={
@@ -166,16 +335,15 @@ export default function LoginScreen() {
               </TouchableOpacity>
             </View>
 
-            {/* 버튼 영역 - 간격 58.64 */}
             <View style={styles.buttonArea}>
-              {/* 로그인 버튼 */}
               <TouchableOpacity
                 style={[
                   styles.loginButton,
                   isFormValid && styles.loginButtonActive,
+                  isLoading && styles.disabledButton,
                 ]}
                 onPress={handleLogin}
-                disabled={!isFormValid}
+                disabled={!isFormValid || isLoading}
                 activeOpacity={0.8}
               >
                 <Text
@@ -184,21 +352,21 @@ export default function LoginScreen() {
                     isFormValid && styles.loginButtonTextActive,
                   ]}
                 >
-                  로그인
+                  {isLoading ? "로그인 중..." : "로그인"}
                 </Text>
               </TouchableOpacity>
 
-              {/* 회원가입 버튼 */}
               <TouchableOpacity
                 style={styles.signupButton}
                 onPress={() => router.push("/(auth)/signup")}
                 activeOpacity={0.8}
+                disabled={isLoading}
               >
                 <Text style={styles.signupButtonText}>회원가입</Text>
               </TouchableOpacity>
             </View>
           </View>
-        </View>
+        </KeyboardAwareScreen>
       </SafeAreaView>
     </TouchableWithoutFeedback>
   );
@@ -212,6 +380,18 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: AppColors.black,
+  },
+  spaceBackground: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "#020203",
+  },
+  starsLayer: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  star: {
+    position: "absolute",
+    backgroundColor: "rgba(255,255,255,0.7)",
+    borderRadius: 999,
   },
   backButton: {
     position: "absolute",
@@ -330,5 +510,8 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "600",
     color: AppColors.white,
+  },
+  disabledButton: {
+    opacity: 0.65,
   },
 });
