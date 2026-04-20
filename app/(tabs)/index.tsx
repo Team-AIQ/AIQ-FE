@@ -1786,6 +1786,7 @@ export default function HomeScreen() {
                 const isOpen = openProvider === model;
                 const label = model === "GPT" ? "Chat GPT" : model;
                 const response = aiResponses[model];
+                if (!response) return null;
                 const IconComponent =
                   model === "GPT"
                     ? OpenAiIcon
