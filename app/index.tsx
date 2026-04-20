@@ -14,7 +14,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 const { width, height } = Dimensions.get("window");
 
 const COLORS = {
-  green: "#5EDE94", // GIF 배경색에 맞춤 (더 밝게)
+  green: "#3CC194", // GIF 배경색과 동일하게 맞춤
 };
 
 export default function SplashScreen() {
@@ -130,7 +130,7 @@ export default function SplashScreen() {
            ====================== */}
         <View style={styles.logoArea}>
           <Image
-            source={require("../assets/images/aiq-animation-logo.gif")}
+            source={require("../assets/images/aiq-animation-logo2.gif")}
             style={styles.beamLogo}
             resizeMode="contain"
           />
