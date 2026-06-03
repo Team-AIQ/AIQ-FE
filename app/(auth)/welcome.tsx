@@ -26,8 +26,14 @@ const OAUTH_URLS = {
   naver: `${API_BASE_URL}/oauth2/authorization/naver?origin=app`,
 };
 
+//const REDIRECT_URL =
+//  process.env.EXPO_PUBLIC_REDIRECT_URL || "exp://localhost:8081";
+
+// Expo Go OAuth 콜백 주소
+// 백엔드 application.properties의 redirect-uri와 동일해야 함
+// 빌드용 앱 딥링크 주소
 const REDIRECT_URL =
-  process.env.EXPO_PUBLIC_REDIRECT_URL || "exp://localhost:8081";
+  process.env.EXPO_PUBLIC_REDIRECT_URL || "aiq://oauth/callback";
 
 type LegalType = "privacy" | "terms" | null;
 
@@ -37,6 +43,12 @@ export default function WelcomeScreen() {
 
   const handleOAuthLogin = async (provider: "kakao" | "google" | "naver") => {
     try {
+      // 여기 추가: 실제로 어떤 주소로 로그인 요청하는지 확인
+      console.log("OAUTH_URL:", OAUTH_URLS[provider]);
+
+      // 여기 추가: 앱으로 다시 돌아올 redirect 주소 확인
+      console.log("REDIRECT_URL:", REDIRECT_URL);
+
       const result = await WebBrowser.openAuthSessionAsync(
         OAUTH_URLS[provider],
         REDIRECT_URL,
