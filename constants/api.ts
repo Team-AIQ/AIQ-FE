@@ -21,24 +21,41 @@ function getDevHost() {
   return undefined;
 }
 
+// function resolveApiBaseUrl() {
+//   const envBaseUrl = process.env.EXPO_PUBLIC_API_BASE_URL;
+//   if (typeof envBaseUrl === "string" && envBaseUrl.trim()) {
+//     return normalizeBaseUrl(envBaseUrl);
+//   }
+
+//   if (__DEV__) {
+//     if (Platform.OS === "android" && Constants.isDevice === false) {
+//       return "http://10.0.2.2:8080";
+//     }
+
+//     const devHost = getDevHost();
+//     if (devHost) {
+//       return `http://${devHost}:8080`;
+//     }
+//   }
+
+//   return "http://localhost:8080";
+// }
+
 function resolveApiBaseUrl() {
+  // =========================
+  // 1. .env에 설정된 API 주소 우선 사용
+  // =========================
   const envBaseUrl = process.env.EXPO_PUBLIC_API_BASE_URL;
+
   if (typeof envBaseUrl === "string" && envBaseUrl.trim()) {
     return normalizeBaseUrl(envBaseUrl);
   }
 
-  if (__DEV__) {
-    if (Platform.OS === "android" && Constants.isDevice === false) {
-      return "http://10.0.2.2:8080";
-    }
-
-    const devHost = getDevHost();
-    if (devHost) {
-      return `http://${devHost}:8080`;
-    }
-  }
-
-  return "http://localhost:8080";
+  // =========================
+  // 2. .env가 빌드에 안 먹었을 때도
+  //    운영 앱에서는 localhost로 가지 않도록 기본값을 운영 API로 둠
+  // =========================
+  return "https://api.aiq.ai.kr";
 }
 
 export const API_BASE_URL = resolveApiBaseUrl();
