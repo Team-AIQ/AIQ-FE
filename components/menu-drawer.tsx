@@ -184,9 +184,7 @@ export function MenuDrawer({
             </ScrollView>
 
             <View style={styles.aiSection}>
-              <Text style={[styles.sectionTitle, styles.aiSectionTitle]}>
-                AI 응답 설정
-              </Text>
+              <Text style={styles.aiSectionTitle}>AI 응답 설정</Text>
               <View style={[styles.toggleGroup, styles.toggleGroupSpaced]}>
                 {(
                   ["chatgpt", "gemini", "perplexity"] as Array<

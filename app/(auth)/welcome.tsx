@@ -2,6 +2,7 @@ import { LegalModal } from "@/components/legal-modal";
 import { API_BASE_URL } from "@/constants/api";
 import { PRIVACY_POLICY, TERMS_OF_SERVICE } from "@/constants/legal";
 import { AppColors } from "@/constants/theme";
+import * as Linking from "expo-linking";
 import { useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import * as WebBrowser from "expo-web-browser";
@@ -43,21 +44,66 @@ export default function WelcomeScreen() {
 
   const handleOAuthLogin = async (provider: "kakao" | "google" | "naver") => {
     try {
-      // 여기 추가: 실제로 어떤 주소로 로그인 요청하는지 확인
-      console.log("OAUTH_URL:", OAUTH_URLS[provider]);
+      // 실제 백엔드 소셜 로그인 요청 주소 확인
+      console.log("[OAuth] 요청 URL:", OAUTH_URLS[provider]);
 
-      // 여기 추가: 앱으로 다시 돌아올 redirect 주소 확인
-      console.log("REDIRECT_URL:", REDIRECT_URL);
+      // 앱으로 돌아올 딥링크 주소 확인
+      console.log("[OAuth] Redirect URL:", REDIRECT_URL);
 
+      // 소셜 로그인 브라우저 실행
       const result = await WebBrowser.openAuthSessionAsync(
         OAUTH_URLS[provider],
         REDIRECT_URL,
       );
 
+      // 사용자가 로그인 창을 닫거나 인증을 취소한 경우
       if (result.type !== "success") {
         Alert.alert("로그인 취소", "소셜 로그인이 취소되었습니다.");
+        return;
       }
-    } catch {
+
+      // 백엔드가 최종적으로 반환한 딥링크 URL
+      // 예:
+      // aiq://oauth/callback
+      // ?accessToken=...
+      // &refreshToken=...
+      console.log("[OAuth] 반환 URL:", result.url);
+
+      // 반환받은 딥링크 URL 분석
+      const parsedUrl = Linking.parse(result.url);
+
+      // URL 쿼리 파라미터에서 토큰 추출
+      const accessTokenParam = parsedUrl.queryParams?.accessToken;
+      const refreshTokenParam = parsedUrl.queryParams?.refreshToken;
+
+      // expo-linking 반환 타입이 string 또는 string[]일 수 있으므로 처리
+      const accessToken = Array.isArray(accessTokenParam)
+        ? accessTokenParam[0]
+        : accessTokenParam;
+
+      const refreshToken = Array.isArray(refreshTokenParam)
+        ? refreshTokenParam[0]
+        : refreshTokenParam;
+
+      // 토큰이 정상적으로 전달되지 않은 경우
+      if (typeof accessToken !== "string" || typeof refreshToken !== "string") {
+        Alert.alert("로그인 실패", "소셜 로그인 토큰을 전달받지 못했습니다.");
+        return;
+      }
+
+      // 기존에 만든 OAuth 콜백 화면으로 이동
+      // callback.tsx에서 토큰 저장 및 메인 화면 이동 처리
+      router.replace({
+        pathname: "/oauth/callback",
+        params: {
+          accessToken,
+          refreshToken,
+        },
+      });
+    } catch (error) {
+      // 실제 오류 확인용 로그
+      console.error("[OAuth] 로그인 처리 오류:", error);
+
       Alert.alert("로그인 오류", "로그인 중 문제가 발생했습니다.");
     }
   };
