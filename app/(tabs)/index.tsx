@@ -56,6 +56,7 @@ import {
   View,
 } from "react-native";
 import {
+  AdEventType,
   RewardedAd,
   RewardedAdEventType,
   TestIds,
@@ -788,7 +789,7 @@ export default function HomeScreen() {
 
     // 유저가 X 버튼을 눌러 광고 창을 닫았을 때 (다음을 위해 새 광고 미리 로드)
     const unsubscribeClosed = rewarded.addAdEventListener(
-      RewardedAdEventType.CLOSED,
+      AdEventType.CLOSED,
       () => {
         setIsAdLoaded(false);
         rewarded.load();
