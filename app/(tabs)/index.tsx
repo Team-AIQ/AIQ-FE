@@ -71,7 +71,9 @@ import OpenAiIcon from "../../assets/images/openai.svg";
 import PerplexityIcon from "../../assets/images/perplexity-color.svg";
 
 const { height } = Dimensions.get("window");
-const adUnitId = __DEV__ ? TestIds.REWARDED : "실제_발급받은_광고단위_ID";
+const adUnitId = __DEV__
+  ? TestIds.REWARDED
+  : "ca-app-pub-3995947459759189/2076466863";
 const rewarded = RewardedAd.createForAdRequest(adUnitId, {
   requestNonPersonalizedAdsOnly: true,
 });
