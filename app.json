@@ -9,19 +9,21 @@
     "plugins": [
       "expo-router",
       "expo-secure-store",
-
       [
         "react-native-google-mobile-ads",
         {
           "iosAppId": "ca-app-pub-3995947459759189~1844173788"
         }
-      ]
+      ],
+      "expo-font",
+      "expo-web-browser"
     ],
-
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.aiq2026.app",
-      "associatedDomains": ["applinks:api.aiq.ai.kr"],
+      "associatedDomains": [
+        "applinks:api.aiq.ai.kr"
+      ],
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
