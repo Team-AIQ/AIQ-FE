@@ -10,11 +10,13 @@ import { StatusBar } from "expo-status-bar";
 import { useEffect, useRef, useState } from "react";
 import { Animated, Dimensions, Image, StyleSheet, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+// 🌟 [추가] 구글 모바일 광고 SDK 임포트
+import mobileAds from "react-native-google-mobile-ads";
 
 const { width, height } = Dimensions.get("window");
 
 const COLORS = {
-  green: "#3CC194", // GIF 배경색과 동일하게 맞춤
+  green: "#3CC194",
 };
 
 export default function SplashScreen() {
@@ -25,17 +27,24 @@ export default function SplashScreen() {
   }>();
   const hasBootstrappedRef = useRef(false);
 
-  /** AIQ 글씨 + 캐릭터 공통 이동 */
   const translateY = useRef(new Animated.Value(-16)).current;
-
-  /** 빔 on/off */
   const [showBeam, setShowBeam] = useState(false);
+
   useEffect(() => {
     const bootstrapAuth = async () => {
       if (hasBootstrappedRef.current) {
         return false;
       }
       hasBootstrappedRef.current = true;
+
+      // 🌟 [추가] 앱이 켜질 때 광고 SDK를 가장 먼저 초기화합니다.
+      try {
+        console.log("[Splash] 모바일 광고 SDK 초기화 시작...");
+        await mobileAds().initialize();
+        console.log("[Splash] 모바일 광고 SDK 초기화 완료!");
+      } catch (error) {
+        console.error("[Splash] 광고 SDK 초기화 실패:", error);
+      }
 
       let accessToken = Array.isArray(params.accessToken)
         ? params.accessToken[0]
@@ -96,12 +105,10 @@ export default function SplashScreen() {
       return false;
     };
 
-    // 1️⃣ 빔 등장
     const beamTimer = setTimeout(() => {
       setShowBeam(true);
     }, 300);
 
-    // 2️⃣ 글씨 + 캐릭터 같이 아주 살짝 하강
     Animated.timing(translateY, {
       toValue: 0,
       duration: 700,
@@ -109,7 +116,6 @@ export default function SplashScreen() {
       useNativeDriver: true,
     }).start();
 
-    // 3️⃣ 스플래시 종료
     const exitTimer = setTimeout(async () => {
       await bootstrapAuth();
     }, 2500);
@@ -118,16 +124,12 @@ export default function SplashScreen() {
       clearTimeout(beamTimer);
       clearTimeout(exitTimer);
     };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar style="dark" />
-
       <View style={styles.container}>
-        {/* ======================
-            그림 로고 (고정)
-           ====================== */}
         <View style={styles.logoArea}>
           <Image
             source={require("../assets/images/aiq-animation-logo2.gif")}
@@ -136,21 +138,14 @@ export default function SplashScreen() {
           />
         </View>
 
-        {/* ======================
-            AIQ 글씨 + 캐릭터
-            (같이 내려감)
-           ====================== */}
         <Animated.View
           style={[styles.movingGroup, { transform: [{ translateY }] }]}
         >
-          {/* AIQ 텍스트 */}
           <Image
             source={require("../assets/images/aiq-text-logo.png")}
             style={styles.textLogo}
             resizeMode="contain"
           />
-
-          {/* 캐릭터 (전체 이미지 그대로) */}
           <Image
             source={require("../assets/images/stay-pickle.png")}
             style={styles.character}

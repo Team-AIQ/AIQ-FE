@@ -56,6 +56,11 @@ import {
   View,
 } from "react-native";
 import {
+  RewardedAd,
+  RewardedAdEventType,
+  TestIds,
+} from "react-native-google-mobile-ads";
+import {
   SafeAreaView,
   useSafeAreaInsets,
 } from "react-native-safe-area-context";
@@ -65,6 +70,10 @@ import OpenAiIcon from "../../assets/images/openai.svg";
 import PerplexityIcon from "../../assets/images/perplexity-color.svg";
 
 const { height } = Dimensions.get("window");
+const adUnitId = __DEV__ ? TestIds.REWARDED : "실제_발급받은_광고단위_ID";
+const rewarded = RewardedAd.createForAdRequest(adUnitId, {
+  requestNonPersonalizedAdsOnly: true,
+});
 
 type Message = {
   id: string;
@@ -613,6 +622,8 @@ export default function HomeScreen() {
   const [isHistoryReport, setIsHistoryReport] = useState(false);
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
   const [isInputFocused, setIsInputFocused] = useState(false);
+  // 🌟 [추가 1] 광고 로딩 완료 여부를 체크하는 상태
+  const [isAdLoaded, setIsAdLoaded] = useState(false);
   const flatListRef = useRef<FlatList>(null);
   const isAtBottomRef = useRef(true);
   const glowAnim = useRef(new Animated.Value(0.5)).current;
@@ -746,7 +757,54 @@ export default function HomeScreen() {
     await refreshHistory();
     await syncCurrentUserSnapshot();
   }, [refreshHistory, syncCurrentUserSnapshot]);
+  // 🌟 [추가 2] 광고 이벤트 리스너 등록 및 사전 로드
+  useEffect(() => {
+    // 광고가 성공적으로 다운로드되었을 때
+    const unsubscribeLoaded = rewarded.addAdEventListener(
+      RewardedAdEventType.LOADED,
+      () => {
+        setIsAdLoaded(true);
+      },
+    );
 
+    // 유저가 광고 시청을 끝내고 보상을 획득했을 때 실행될 로직
+    const unsubscribeEarned = rewarded.addAdEventListener(
+      RewardedAdEventType.EARNED_REWARD,
+      async (reward) => {
+        // 백엔드 크레딧 동기화 등 보상 처리
+        const synced = await syncCurrentUserSnapshot();
+        setCreditsOpen(false); // 모달 닫기
+
+        if (synced) {
+          Alert.alert(
+            "크레딧 충전 완료",
+            "광고 시청이 완료되어 크레딧이 충전되었습니다!",
+          );
+        } else {
+          Alert.alert("동기화 실패", "크레딧을 새로고침하지 못했습니다.");
+        }
+      },
+    );
+
+    // 유저가 X 버튼을 눌러 광고 창을 닫았을 때 (다음을 위해 새 광고 미리 로드)
+    const unsubscribeClosed = rewarded.addAdEventListener(
+      RewardedAdEventType.CLOSED,
+      () => {
+        setIsAdLoaded(false);
+        rewarded.load();
+      },
+    );
+
+    // 화면 진입 시 첫 광고 로드 시작
+    rewarded.load();
+
+    // 컴포넌트가 언마운트될 때 리스너 정리
+    return () => {
+      unsubscribeLoaded();
+      unsubscribeEarned();
+      unsubscribeClosed();
+    };
+  }, [syncCurrentUserSnapshot]);
   useFocusEffect(
     useCallback(() => {
       loadUserData();
@@ -1479,20 +1537,17 @@ export default function HomeScreen() {
   };
 
   const handleCreditReward = async () => {
-    const synced = await syncCurrentUserSnapshot();
-    setCreditsOpen(false);
-    if (synced) {
+    if (isAdLoaded) {
+      // 로드된 광고를 보여줍니다.
+      rewarded.show();
+    } else {
       Alert.alert(
-        "크레딧 동기화",
-        "서버의 최신 크레딧을 반영했습니다. 광고 보상은 AdMob 서버 콜백으로 지급됩니다.",
+        "안내",
+        "광고를 아직 불러오는 중입니다. 잠시 후 다시 시도해 주세요.",
       );
-      return;
+      // 만약 네트워크 문제 등으로 로드가 안 되었다면 다시 요청해 둡니다.
+      rewarded.load();
     }
-
-    Alert.alert(
-      "동기화 실패",
-      "서버와 통신할 수 없어 크레딧을 새로고침하지 못했습니다.",
-    );
   };
 
   const handleLogout = async () => {

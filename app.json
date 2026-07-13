@@ -6,7 +6,18 @@
     "orientation": "portrait",
     "scheme": "aiq",
     "userInterfaceStyle": "automatic",
-    "plugins": ["expo-router", "expo-secure-store"],
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+
+      [
+        "react-native-google-mobile-ads",
+        {
+          "iosAppId": "ca-app-pub-3995947459759189~1844173788"
+        }
+      ]
+    ],
+
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.aiq2026.app",
