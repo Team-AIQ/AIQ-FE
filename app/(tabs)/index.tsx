@@ -811,12 +811,6 @@ export default function HomeScreen() {
 
         // 개발 중 실제 오류 내용 확인
         console.error("[RewardedAd] 광고 오류:", error);
-
-        // 사용자에게 광고 오류 안내
-        Alert.alert(
-          "광고 로드 오류",
-          error.message || "광고를 불러오는 중 문제가 발생했습니다.",
-        );
       },
     );
 
