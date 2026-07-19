@@ -18,6 +18,7 @@
       "expo-font",
       "expo-web-browser"
     ],
+    "icon": "./assets/images/icon.png",
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.aiq2026.app",
