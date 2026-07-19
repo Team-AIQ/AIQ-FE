@@ -20,11 +20,9 @@
     ],
     "icon": "./assets/images/icon.png",
     "ios": {
-      "supportsTablet": true,
+      "supportsTablet": false,
       "bundleIdentifier": "com.aiq2026.app",
-      "associatedDomains": [
-        "applinks:api.aiq.ai.kr"
-      ],
+      "associatedDomains": ["applinks:api.aiq.ai.kr"],
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
