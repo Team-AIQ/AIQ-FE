@@ -773,10 +773,12 @@ export default function HomeScreen() {
     // 유저가 광고 시청을 끝내고 보상을 획득했을 때 실행될 로직
     const unsubscribeEarned = rewarded.addAdEventListener(
       RewardedAdEventType.EARNED_REWARD,
-      async (reward) => {
-        // 백엔드 크레딧 동기화 등 보상 처리
+
+      // reward 값을 실제로 사용하지 않으므로 매개변수 제거
+      async () => {
         const synced = await syncCurrentUserSnapshot();
-        setCreditsOpen(false); // 모달 닫기
+
+        setCreditsOpen(false);
 
         if (synced) {
           Alert.alert(
@@ -798,6 +800,20 @@ export default function HomeScreen() {
       },
     );
 
+    // 광고를 불러오거나 표시하는 과정에서 오류가 발생했을 때 실행
+    const unsubscribeError = rewarded.addAdEventListener(
+      AdEventType.ERROR,
+
+      // 광고 오류 객체 타입을 Error로 명시
+      (error: Error) => {
+        // 광고가 정상적으로 준비되지 않은 상태
+        setIsAdLoaded(false);
+
+        // 개발 중 실제 오류 내용 확인
+        console.error("[RewardedAd] 광고 오류:", error);
+      },
+    );
+
     // 화면 진입 시 첫 광고 로드 시작
     rewarded.load();
 
@@ -806,6 +822,7 @@ export default function HomeScreen() {
       unsubscribeLoaded();
       unsubscribeEarned();
       unsubscribeClosed();
+      unsubscribeError();
     };
   }, [syncCurrentUserSnapshot]);
   useFocusEffect(
